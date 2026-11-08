@@ -8,7 +8,7 @@ interface Props {
 
 export default function ApiKeyModal({ initialKey = '', onSave, onClose }: Props) {
   const [value, setValue] = useState(initialKey)
-  const valid = value.trim().startsWith('sk-ant-')
+  const valid = value.trim().startsWith('gsk_')
 
   function submit(e: FormEvent) {
     e.preventDefault()
@@ -25,9 +25,9 @@ export default function ApiKeyModal({ initialKey = '', onSave, onClose }: Props)
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-white text-xl">
             🔑
           </div>
-          <h2 className="text-lg font-semibold tracking-tight">Sua API Key</h2>
+          <h2 className="text-lg font-semibold tracking-tight">Sua API Key do Groq</h2>
           <p className="text-sm text-zinc-500 leading-relaxed">
-            A chave fica salva apenas neste navegador e é enviada direto para a Anthropic.
+            Gratuita. A chave fica salva apenas neste navegador e é enviada direto para o Groq.
           </p>
         </div>
 
@@ -36,7 +36,7 @@ export default function ApiKeyModal({ initialKey = '', onSave, onClose }: Props)
           autoFocus
           autoComplete="off"
           spellCheck={false}
-          placeholder="sk-ant-..."
+          placeholder="gsk_..."
           value={value}
           onChange={(e) => setValue(e.target.value)}
           className="w-full min-h-11 rounded-2xl bg-zinc-100 px-4 text-base outline-none ring-1 ring-transparent transition-all duration-300 ease-out focus:bg-white focus:ring-zinc-300"
@@ -62,12 +62,12 @@ export default function ApiKeyModal({ initialKey = '', onSave, onClose }: Props)
         </div>
 
         <a
-          href="https://console.anthropic.com/settings/keys"
+          href="https://console.groq.com/keys"
           target="_blank"
           rel="noreferrer"
           className="block text-center text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
         >
-          Obter uma chave no Anthropic Console →
+          Criar uma chave grátis no Groq Console →
         </a>
       </form>
     </div>

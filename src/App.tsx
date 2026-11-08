@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ApiKeyModal from './components/ApiKeyModal'
 import ChatInput from './components/ChatInput'
 import MessageBubble, { TypingIndicator } from './components/MessageBubble'
-import { getApiKey, sendMessage, setApiKey, type ChatMessage } from './services/claude'
+import { getApiKey, sendMessage, setApiKey, type ChatMessage } from './services/groq'
 
 const GREETING: ChatMessage = {
   role: 'assistant',

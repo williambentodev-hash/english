@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../services/claude'
+import type { ChatMessage } from '../services/groq'
 
 // Destaca correções entre colchetes nas respostas do tutor.
 function renderContent(text: string) {
