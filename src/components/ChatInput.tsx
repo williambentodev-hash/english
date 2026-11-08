@@ -1,21 +1,41 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent } from 'react'
+import { useSpeechRecognition } from '../services/speech'
 
 interface Props {
   disabled?: boolean
   onSend: (text: string) => void
 }
 
+// Pressionar por mais que isso = modo "segurar para falar"; menos = toque liga/desliga.
+const HOLD_MS = 350
+
 export default function ChatInput({ disabled, onSend }: Props) {
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
+  const baseText = useRef('') // texto que já estava no input antes de começar a falar
+  const press = useRef<{ at: number; startedNow: boolean } | null>(null)
+
+  const mic = useSpeechRecognition((spoken) => {
+    const base = baseText.current
+    setText(base && spoken ? `${base} ${spoken}` : base || spoken)
+  })
+
   const canSend = text.trim().length > 0 && !disabled
+
+  // ajusta a altura também quando o texto vem do microfone
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 128)}px`
+  }, [text])
 
   function submit(e?: FormEvent) {
     e?.preventDefault()
     if (!canSend) return
+    mic.stop()
     onSend(text.trim())
     setText('')
-    if (ref.current) ref.current.style.height = 'auto'
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -24,6 +44,31 @@ export default function ChatInput({ disabled, onSend }: Props) {
       e.preventDefault()
       submit()
     }
+  }
+
+  function startMic() {
+    baseText.current = text.trim()
+    mic.start()
+  }
+
+  function onMicDown(e: PointerEvent<HTMLButtonElement>) {
+    if (e.button !== 0) return
+    e.preventDefault() // mantém o foco/teclado como estão
+    e.currentTarget.setPointerCapture(e.pointerId)
+    if (mic.listening) {
+      mic.stop()
+      press.current = { at: Date.now(), startedNow: false }
+    } else {
+      startMic()
+      press.current = { at: Date.now(), startedNow: true }
+    }
+  }
+
+  function onMicUp() {
+    const p = press.current
+    press.current = null
+    // segurou: soltar encerra a gravação; toque rápido: continua gravando até o próximo toque
+    if (p?.startedNow && Date.now() - p.at >= HOLD_MS) mic.stop()
   }
 
   return (
@@ -36,15 +81,39 @@ export default function ChatInput({ disabled, onSend }: Props) {
           ref={ref}
           rows={1}
           value={text}
-          placeholder="Write in English…"
-          onChange={(e) => {
-            setText(e.target.value)
-            e.target.style.height = 'auto'
-            e.target.style.height = `${Math.min(e.target.scrollHeight, 128)}px`
-          }}
+          placeholder={mic.listening ? 'Listening…' : mic.error ?? 'Write in English…'}
+          onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
-          className="flex-1 min-h-11 max-h-32 resize-none rounded-3xl bg-zinc-100 px-4 py-2.5 text-base leading-6 outline-none ring-1 ring-transparent transition-all duration-300 ease-out focus:bg-white focus:ring-zinc-300"
+          className={`flex-1 min-h-11 max-h-32 resize-none rounded-3xl bg-zinc-100 px-4 py-2.5 text-base leading-6 outline-none ring-1 transition-all duration-300 ease-out focus:bg-white focus:ring-zinc-300 ${
+            mic.listening ? 'bg-white ring-red-200' : mic.error ? 'ring-transparent placeholder:text-red-400' : 'ring-transparent'
+          }`}
         />
+        {mic.supported && (
+          <button
+            type="button"
+            aria-label={mic.listening ? 'Parar gravação' : 'Falar (toque ou segure)'}
+            aria-pressed={mic.listening}
+            title="Toque ou segure para falar"
+            onPointerDown={onMicDown}
+            onPointerUp={onMicUp}
+            onPointerCancel={onMicUp}
+            onClick={(e) => {
+              // apenas teclado (Enter/Espaço): ponteiro já é tratado acima
+              if (e.detail === 0) (mic.listening ? mic.stop() : startMic())
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            className={`flex h-11 w-11 shrink-0 touch-none select-none items-center justify-center rounded-full transition-all duration-300 ease-out active:scale-90 ${
+              mic.listening
+                ? 'bg-red-500 text-white animate-mic-pulse'
+                : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700'
+            }`}
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="3" width="6" height="11" rx="3" fill={mic.listening ? 'currentColor' : 'none'} />
+              <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+            </svg>
+          </button>
+        )}
         <button
           type="submit"
           disabled={!canSend}
