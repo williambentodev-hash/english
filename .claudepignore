@@ -1,0 +1,8 @@
+node_modules/
+dist/
+build/
+.vite/
+coverage/
+*.log
+package-lock.json
+*.tsbuildinfo
