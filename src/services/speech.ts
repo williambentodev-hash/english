@@ -79,56 +79,130 @@ function mergeResults(results: ArrayLike<SpeechRecognitionResultLike>) {
   return collapseRepeats(acc)
 }
 
-// Instância ativa (no máximo uma), para que o TTS possa cortar o microfone.
-let activeRec: SpeechRecognitionLike | null = null
+// Sessão ativa (no máximo uma), para que o TTS possa cortar o microfone.
+let abortActive: (() => void) | null = null
 
 /** Para o reconhecimento imediatamente (usado quando o tutor começa a falar). */
 export function abortListening() {
-  activeRec?.abort()
+  abortActive?.()
 }
+
+// Erros em que não adianta reabrir o microfone.
+const FATAL_ERRORS = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'language-not-supported'])
+// Proteção: encerra sozinho depois de muito tempo sem ouvir nada.
+const IDLE_TIMEOUT_MS = 60_000
+// Sessões que terminam quase na hora seguidas vezes indicam um problema: desiste.
+const QUICK_END_MS = 1000
+const MAX_QUICK_ENDS = 4
+
+const joinText = (a: string, b: string) => (a && b ? `${a} ${b}` : a || b)
 
 /**
  * Reconhecimento de voz em inglês. `onTranscript` recebe o texto acumulado
- * da sessão atual (parcial enquanto o usuário fala, final ao terminar),
- * já sem palavras repetidas.
+ * desde o início da gravação (parcial enquanto o usuário fala), já sem
+ * palavras repetidas.
+ *
+ * O navegador encerra a sessão sozinho após alguns segundos de silêncio
+ * (no celular, bem rápido). Para o usuário poder pausar e pensar, a sessão é
+ * reaberta automaticamente, preservando o texto, até ele tocar no microfone
+ * de novo, enviar a mensagem ou ficar 60 s em silêncio.
  */
 export function useSpeechRecognition(onTranscript: (text: string) => void) {
   const [listening, setListening] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const recRef = useRef<SpeechRecognitionLike | null>(null)
+  const wantRef = useRef(false) // o usuário quer continuar gravando?
+  const committedRef = useRef('') // texto de sessões anteriores desta gravação
+  const sessionTextRef = useRef('') // texto da sessão atual
+  const quickEnds = useRef(0)
   const endTimer = useRef<number | undefined>(undefined)
+  const idleTimer = useRef<number | undefined>(undefined)
   const cbRef = useRef(onTranscript)
   cbRef.current = onTranscript
 
-  /** Solta a instância: remove handlers, cancela timers e zera o estado. */
-  const cleanup = useCallback((rec: SpeechRecognitionLike | null) => {
-    window.clearTimeout(endTimer.current)
-    if (rec) {
-      rec.onresult = null
-      rec.onerror = null
-      rec.onend = null
-    }
+  const detach = useCallback((rec: SpeechRecognitionLike | null) => {
+    if (!rec) return
+    rec.onresult = null
+    rec.onerror = null
+    rec.onend = null
     if (recRef.current === rec) recRef.current = null
-    if (activeRec === rec) activeRec = null
-    setListening(false)
   }, [])
+
+  /** Encerra a gravação de vez e zera o estado. */
+  const finish = useCallback(() => {
+    wantRef.current = false
+    window.clearTimeout(endTimer.current)
+    window.clearTimeout(idleTimer.current)
+    const rec = recRef.current
+    detach(rec)
+    rec?.abort()
+    abortActive = null
+    setListening(false)
+  }, [detach])
+
+  const armIdle = useCallback(() => {
+    window.clearTimeout(idleTimer.current)
+    idleTimer.current = window.setTimeout(() => {
+      wantRef.current = false
+      recRef.current?.stop()
+    }, IDLE_TIMEOUT_MS)
+  }, [])
+
+  /** Abre uma sessão do reconhecedor (a primeira ou uma reabertura). */
+  const openSession = useCallback(() => {
+    const Ctor = getRecognitionCtor()
+    if (!Ctor) return finish()
+    const rec = new Ctor()
+    const startedAt = Date.now()
+    sessionTextRef.current = ''
+    rec.lang = LANG
+    rec.continuous = true
+    rec.interimResults = true
+    rec.onresult = (e) => {
+      if (recRef.current !== rec) return
+      sessionTextRef.current = mergeResults(e.results)
+      quickEnds.current = 0
+      armIdle()
+      cbRef.current(collapseRepeats(joinText(committedRef.current, sessionTextRef.current)))
+    }
+    rec.onerror = (e) => {
+      if (FATAL_ERRORS.has(e.error)) {
+        wantRef.current = false
+        setError(STT_ERRORS[e.error] ?? 'Não foi possível ouvir. Tente de novo.')
+      }
+      // 'no-speech' e 'aborted' são normais durante pausas: a sessão é reaberta
+    }
+    rec.onend = () => {
+      if (recRef.current !== rec) return
+      detach(rec)
+      committedRef.current = joinText(committedRef.current, sessionTextRef.current)
+      sessionTextRef.current = ''
+      quickEnds.current = Date.now() - startedAt < QUICK_END_MS ? quickEnds.current + 1 : 0
+      if (wantRef.current && quickEnds.current < MAX_QUICK_ENDS) openSession()
+      else finish()
+    }
+    recRef.current = rec
+    try {
+      rec.start()
+    } catch {
+      finish()
+    }
+  }, [armIdle, detach, finish])
 
   const stop = useCallback(() => {
     const rec = recRef.current
-    if (!rec) return
-    rec.stop()
+    wantRef.current = false
+    if (!rec) return finish()
+    rec.stop() // deixa o navegador entregar o último trecho antes do `onend`
     // alguns navegadores móveis nem sempre disparam `onend`: força a limpeza
     window.clearTimeout(endTimer.current)
     endTimer.current = window.setTimeout(() => {
-      if (recRef.current !== rec) return
-      rec.abort()
-      cleanup(rec)
+      if (recRef.current === rec) finish()
     }, 1500)
-  }, [cleanup])
+  }, [finish])
 
   const start = useCallback(() => {
-    const Ctor = getRecognitionCtor()
-    if (!Ctor || recRef.current) return
+    if (!getRecognitionCtor() || wantRef.current) return
     // Toque acidental enquanto o tutor fala: só interrompe a leitura, sem abrir
     // o microfone — senão ele capta o eco do alto-falante do celular.
     if (speakingId !== null) {
@@ -136,37 +210,26 @@ export function useSpeechRecognition(onTranscript: (text: string) => void) {
       return
     }
     setError(null)
-
-    const rec = new Ctor()
-    rec.lang = LANG
-    rec.continuous = true
-    rec.interimResults = true
-    rec.onresult = (e) => {
-      if (recRef.current !== rec) return
-      cbRef.current(mergeResults(e.results))
-    }
-    rec.onerror = (e) => {
-      if (e.error !== 'aborted' && e.error !== 'no-speech') {
-        setError(STT_ERRORS[e.error] ?? 'Não foi possível ouvir. Tente de novo.')
-      }
-    }
-    rec.onend = () => cleanup(rec)
-    recRef.current = rec
-    activeRec = rec
-    try {
-      rec.start()
-      setListening(true)
-    } catch {
-      cleanup(rec)
-    }
-  }, [cleanup])
+    abortActive?.() // garante uma única gravação por vez
+    wantRef.current = true
+    committedRef.current = ''
+    quickEnds.current = 0
+    abortActive = finish
+    setListening(true)
+    armIdle()
+    openSession()
+  }, [armIdle, finish, openSession])
 
   // encerra a captura e libera a instância se o componente desmontar
   useEffect(() => () => {
+    if (abortActive === finish) abortActive = null
+    wantRef.current = false
+    window.clearTimeout(endTimer.current)
+    window.clearTimeout(idleTimer.current)
     const rec = recRef.current
+    detach(rec)
     rec?.abort()
-    cleanup(rec)
-  }, [cleanup])
+  }, [detach, finish])
 
   return { supported: sttSupported, listening, error, start, stop }
 }

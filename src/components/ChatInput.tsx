@@ -73,6 +73,20 @@ export default function ChatInput({ disabled, onSend }: Props) {
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-900/5 bg-white/80 backdrop-blur-md">
+      {mic.listening && (
+        <div
+          role="status"
+          className="pointer-events-none absolute inset-x-0 bottom-full mb-2 flex justify-center animate-in"
+        >
+          <span className="flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-zinc-600 shadow-sm ring-1 ring-zinc-900/5 backdrop-blur-md">
+            <span className="relative flex h-2 w-2" aria-hidden>
+              <span className="absolute inset-0 rounded-full bg-red-500 animate-ping opacity-60" />
+              <span className="relative h-2 w-2 rounded-full bg-red-500" />
+            </span>
+            Ouvindo · toque no microfone para encerrar
+          </span>
+        </div>
+      )}
       <form
         onSubmit={submit}
         className="mx-auto flex max-w-2xl items-end gap-2 px-3 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]"
@@ -93,7 +107,7 @@ export default function ChatInput({ disabled, onSend }: Props) {
             type="button"
             aria-label={mic.listening ? 'Parar gravação' : 'Falar (toque ou segure)'}
             aria-pressed={mic.listening}
-            title="Toque ou segure para falar"
+            title={mic.listening ? 'Toque para encerrar' : 'Toque ou segure para falar'}
             onPointerDown={onMicDown}
             onPointerUp={onMicUp}
             onPointerCancel={onMicUp}
@@ -108,10 +122,15 @@ export default function ChatInput({ disabled, onSend }: Props) {
                 : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700'
             }`}
           >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="3" width="6" height="11" rx="3" fill={mic.listening ? 'currentColor' : 'none'} />
-              <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
-            </svg>
+            {mic.listening ? (
+              // quadrado de "parar", como no Gravador do iPhone
+              <span className="h-3.5 w-3.5 rounded-[4px] bg-white" aria-hidden />
+            ) : (
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+              </svg>
+            )}
           </button>
         )}
         <button
