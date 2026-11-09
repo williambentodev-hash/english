@@ -182,23 +182,121 @@ function setSpeakingId(id: string | null) {
   listeners.forEach((l) => l())
 }
 
-// Vozes que soam mais naturais, em ordem de preferência (Safari/iOS, Chrome, Edge).
-const PREFERRED_VOICES = ['Samantha', 'Google US English', 'Microsoft Aria', 'Microsoft Jenny', 'Ava', 'Allison']
+/*
+ * Seleção de voz: dá uma nota a cada voz em inglês e usa a melhor.
+ * As vozes neurais gratuitas variam por plataforma:
+ *  - Edge (desktop/Android): "Microsoft Aria/Jenny/Guy Online (Natural)"
+ *  - Chrome: "Google US English" / "Google UK English Female"
+ *  - iOS/macOS: "Ava (Premium)", "Samantha (Enhanced)", "Zoe", "Evan"...
+ *  - Android: vozes "Google" com qualidade alta ("en-us-x-...-network")
+ */
+const QUALITY_KEYWORDS: [RegExp, number][] = [
+  [/\bnatural\b/i, 100],
+  [/\bneural\b/i, 90],
+  [/\bpremium\b/i, 85],
+  [/\benhanced\b/i, 75],
+  [/\bonline\b/i, 30],
+  [/network/i, 25], // vozes do Android que usam o servidor do Google
+  [/^google (us|uk) english/i, 60],
+  [/\bgoogle\b/i, 20],
+]
+
+// Vozes de boa qualidade conhecidas pelo nome (Apple, Microsoft e outras).
+const GOOD_NAMES =
+  /\b(ava|samantha|allison|susan|zoe|evan|nathan|joelle|noelle|tom|serena|daniel|kate|oliver|stephanie|aria|jenny|guy|michelle|ana|christopher|eric|roger|steffan|emma|brian|andrew|libby|sonia|ryan|siri)\b/i
+
+// Vozes "de efeito" do macOS e sintetizadores antigos — soam muito robóticas.
+const BAD_NAMES =
+  /\b(albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|fred|good news|hysterical|jester|junior|organ|pipe organ|ralph|superstar|trinoids|whisper|wobble|zarvox|grandma|grandpa|eddy|flo|reed|rocko|sandy|shelley|espeak)\b/i
+
+function langScore(lang: string) {
+  const l = lang.replace('_', '-').toLowerCase()
+  if (l === 'en-us') return 40
+  if (l === 'en-gb') return 30
+  if (l.startsWith('en')) return 5
+  return -Infinity
+}
+
+function scoreVoice(v: SpeechSynthesisVoice) {
+  let score = langScore(v.lang)
+  for (const [re, pts] of QUALITY_KEYWORDS) if (re.test(v.name)) score += pts
+  if (GOOD_NAMES.test(v.name)) score += 40
+  if (BAD_NAMES.test(v.name)) score -= 200
+  // as vozes SAPI antigas do Windows (David, Zira, Mark) são as mais robóticas
+  if (/microsoft (david|zira|mark|hazel|george)\b/i.test(v.name) && !/natural|online/i.test(v.name)) score -= 30
+  if (v.default) score += 5
+  return score
+}
+
+/* Velocidade da fala, escolhida pelo usuário e salva no localStorage. */
+export const SPEECH_RATES = [0.75, 0.9, 1] as const
+export type SpeechRate = (typeof SPEECH_RATES)[number]
+const RATE_KEY = 'tutor_speech_rate'
+const isRate = (v: unknown): v is SpeechRate => SPEECH_RATES.includes(v as SpeechRate)
+
+let speechRate: SpeechRate = (() => {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(RATE_KEY) ?? 'null')
+    return isRate(v) ? v : 1
+  } catch {
+    return 1
+  }
+})()
+const rateListeners = new Set<() => void>()
+
+export function setSpeechRate(rate: SpeechRate) {
+  speechRate = rate
+  try { localStorage.setItem(RATE_KEY, JSON.stringify(rate)) } catch { /* modo privado */ }
+  rateListeners.forEach((l) => l())
+}
+
+export function useSpeechRate() {
+  return useSyncExternalStore(
+    (l) => { rateListeners.add(l); return () => rateListeners.delete(l) },
+    () => speechRate,
+  )
+}
+
+let cachedVoice: SpeechSynthesisVoice | null | undefined
 
 function pickVoice(): SpeechSynthesisVoice | undefined {
-  const voices = window.speechSynthesis.getVoices()
-  const us = voices.filter((v) => v.lang.replace('_', '-') === LANG)
-  for (const name of PREFERRED_VOICES) {
-    const v = us.find((v) => v.name.includes(name))
-    if (v) return v
-  }
-  return us.find((v) => v.localService) ?? us[0] ?? voices.find((v) => v.lang.startsWith('en'))
+  if (cachedVoice !== undefined) return cachedVoice ?? undefined
+  const ranked = window.speechSynthesis
+    .getVoices()
+    .map((v) => ({ v, s: scoreVoice(v) }))
+    .filter((x) => x.s > -Infinity)
+    .sort((a, b) => b.s - a.s)
+  // só guarda em cache quando a lista já carregou (ela pode vir vazia no início)
+  if (ranked.length) cachedVoice = ranked[0].v
+  return ranked[0]?.v
 }
 
 if (ttsSupported) {
   // em alguns navegadores a lista de vozes carrega de forma assíncrona
   window.speechSynthesis.getVoices()
-  window.speechSynthesis.addEventListener?.('voiceschanged', () => window.speechSynthesis.getVoices())
+  window.speechSynthesis.addEventListener?.('voiceschanged', () => {
+    cachedVoice = undefined
+    pickVoice()
+  })
+}
+
+/**
+ * Divide o texto em frases de até ~180 caracteres. Além de criar pausas naturais,
+ * evita o bug do Chrome em que as vozes online param de falar depois de ~15 s.
+ */
+function splitIntoChunks(text: string, max = 180) {
+  const sentences = text.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) ?? [text]
+  const chunks: string[] = []
+  let current = ''
+  for (const s of sentences) {
+    if (current && (current + s).length > max) {
+      chunks.push(current.trim())
+      current = ''
+    }
+    current += s
+  }
+  if (current.trim()) chunks.push(current.trim())
+  return chunks
 }
 
 /** Remove as dicas entre colchetes e emojis, que soam estranhos lidos em voz alta. */
@@ -213,16 +311,21 @@ export function speak(id: string, text: string) {
   abortListening() // nunca ouvir o próprio alto-falante
   const synth = window.speechSynthesis
   synth.cancel()
-  const u = new SpeechSynthesisUtterance(toSpeakable(text))
-  u.lang = LANG
-  u.rate = 0.95 // um pouco mais devagar, ajuda quem está aprendendo
   const voice = pickVoice()
-  if (voice) u.voice = voice
+  const chunks = splitIntoChunks(toSpeakable(text))
+  if (!chunks.length) return
   const done = () => { if (speakingId === id) setSpeakingId(null) }
-  u.onend = done
-  u.onerror = done
   setSpeakingId(id)
-  synth.speak(u)
+  chunks.forEach((chunk, i) => {
+    const u = new SpeechSynthesisUtterance(chunk)
+    if (voice) u.voice = voice
+    u.lang = voice?.lang ?? LANG
+    u.rate = speechRate // 0.75 = mais lento e pausado (treino de listening), 1 = normal
+    u.pitch = 1.0
+    if (i === chunks.length - 1) u.onend = done
+    u.onerror = done
+    synth.speak(u)
+  })
 }
 
 export function stopSpeaking() {

@@ -1,4 +1,4 @@
-import { useEffect, useId, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import type { ChatMessage, Feedback } from '../services/groq'
 import { getSpeakingId, speak, stopSpeaking, ttsSupported, useIsSpeaking } from '../services/speech'
 
@@ -146,15 +146,43 @@ export default function MessageBubble({ message, onReveal }: Props) {
     )
   }
 
+  return <TutorBubble message={message} onReveal={onReveal} />
+}
+
+function TutorBubble({ message, onReveal }: Props) {
+  const [translated, setTranslated] = useState(false)
+  const canTranslate = !message.hidden && !!message.translation
+
   return (
     <div className="flex flex-col items-start gap-1.5 animate-in">
       {message.feedback && <FeedbackCard feedback={message.feedback} />}
       <div className="flex w-full items-end gap-1">
         <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-3xl rounded-bl-lg bg-white px-4 py-2.5 text-[15px] leading-relaxed text-zinc-900 shadow-sm ring-1 ring-zinc-900/5 sm:max-w-[70%]">
           {message.hidden ? <HiddenContent onReveal={onReveal} /> : message.content}
+          {canTranslate && translated && (
+            <p lang="pt-BR" className="mt-2 border-t border-zinc-900/5 pt-2 text-[14px] leading-snug text-zinc-500 animate-in">
+              {message.translation}
+            </p>
+          )}
         </div>
         {ttsSupported && <ListenButton text={message.content} autoPlay={message.hidden} />}
       </div>
+      {canTranslate && (
+        <button
+          type="button"
+          onClick={() => setTranslated((t) => !t)}
+          aria-pressed={translated}
+          className={`-mt-0.5 ml-2 flex min-h-7 items-center gap-1 rounded-full px-1.5 text-xs font-medium transition-colors duration-300 ease-out ${
+            translated ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-600'
+          }`}
+        >
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+          </svg>
+          {translated ? 'Ocultar tradução' : 'Traduzir'}
+        </button>
+      )}
     </div>
   )
 }

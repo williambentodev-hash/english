@@ -42,7 +42,7 @@ ${LEVEL_GUIDE[level]}
 
 Every time you answer you must (1) evaluate the learner's LAST message and (2) continue the conversation.
 Respond ONLY with a JSON object in exactly this shape, no markdown:
-{"feedback":{"score":<integer 1-10>,"correction":<string or null>,"native":<string>},"reply":<string>}
+{"feedback":{"score":<integer 1-10>,"correction":<string or null>,"native":<string>},"reply":<string>,"translation":<string>}
 
 "feedback" — about the learner's last message only:
 - "score": how natural and grammatically correct it is. 10 = sounds like a fluent native speaker; 7-9 = correct but slightly unnatural; 4-6 = understandable with clear mistakes; 1-3 = hard to understand.
@@ -53,7 +53,9 @@ Respond ONLY with a JSON object in exactly this shape, no markdown:
 "reply" — your conversational message:
 - Plain text, 2-3 short sentences, like a natural chat message. No markdown, lists, headings or corrections (corrections only go in "feedback").
 - React to what the learner said and usually end with a simple follow-up question.
-- Be warm and encouraging, never condescending.`
+- Be warm and encouraging, never condescending.
+
+"translation" — a natural Brazilian Portuguese translation of your "reply" (meaning, not word for word).`
 }
 
 /* ---------------- Tipos ---------------- */
@@ -71,6 +73,8 @@ export interface ChatMessage {
   role: Role
   content: string
   feedback?: Feedback | null
+  /** tradução para o português (só mensagens do tutor) */
+  translation?: string | null
   /** modo escuta: texto oculto até o aluno responder ou revelar */
   hidden?: boolean
 }
@@ -78,6 +82,7 @@ export interface ChatMessage {
 export interface TutorReply {
   reply: string
   feedback: Feedback | null
+  translation: string | null
 }
 
 export class AIError extends Error {
@@ -134,16 +139,16 @@ export function parseTutorReply(raw: string): TutorReply {
           native,
         }
       : null
-    return { reply, feedback }
+    return { reply, feedback, translation: str(data?.translation) }
   } catch {
-    return { reply: raw.trim(), feedback: null }
+    return { reply: raw.trim(), feedback: null, translation: null }
   }
 }
 
 /** Mensagens do tutor voltam no mesmo formato JSON para o modelo manter o padrão. */
-function toApiMessage({ role, content, feedback }: ChatMessage) {
+function toApiMessage({ role, content, feedback, translation }: ChatMessage) {
   if (role === 'user') return { role, content }
-  return { role, content: JSON.stringify({ feedback: feedback ?? null, reply: content }) }
+  return { role, content: JSON.stringify({ feedback: feedback ?? null, reply: content, translation: translation ?? null }) }
 }
 
 /* ---------------- Chamada ---------------- */

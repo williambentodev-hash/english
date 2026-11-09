@@ -2,14 +2,21 @@ import { useEffect, useRef, useState } from 'react'
 import ApiKeyModal from './components/ApiKeyModal'
 import ChatInput from './components/ChatInput'
 import LevelPicker from './components/LevelPicker'
+import SpeedPicker from './components/SpeedPicker'
 import MessageBubble, { TypingIndicator } from './components/MessageBubble'
 import { getApiKey, isLevel, sendMessage, setApiKey, type ChatMessage, type Level } from './services/groq'
 import { isBoolean, usePersistentState } from './services/prefs'
 import { ttsSupported } from './services/speech'
 
 const GREETING_TEXT = "Hi there! 👋 I'm your English tutor. How was your day today?"
+const GREETING_TRANSLATION = 'Olá! 👋 Eu sou seu professor de inglês. Como foi o seu dia hoje?'
 
-const greeting = (blind: boolean): ChatMessage => ({ role: 'assistant', content: GREETING_TEXT, hidden: blind })
+const greeting = (blind: boolean): ChatMessage => ({
+  role: 'assistant',
+  content: GREETING_TEXT,
+  translation: GREETING_TRANSLATION,
+  hidden: blind,
+})
 
 export default function App() {
   const [apiKey, setKey] = useState<string | null>(() => getApiKey())
@@ -56,8 +63,8 @@ export default function App() {
     try {
       // A API exige que a conversa comece com "user": a saudação local é omitida.
       const history = next[0].role === 'assistant' ? next.slice(1) : next
-      const { reply, feedback } = await sendMessage(history, apiKey, level)
-      setMessages((m) => [...m, { role: 'assistant', content: reply, feedback, hidden: blind }])
+      const { reply, feedback, translation } = await sendMessage(history, apiKey, level)
+      setMessages((m) => [...m, { role: 'assistant', content: reply, feedback, translation, hidden: blind }])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro inesperado.')
       // remove a mensagem não respondida para manter a alternância user/assistant
@@ -87,6 +94,7 @@ export default function App() {
             >
               Nova
             </button>
+            {ttsSupported && <SpeedPicker />}
             {ttsSupported && (
               <button
                 onClick={() => setBlind((b) => !b)}
