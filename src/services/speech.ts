@@ -295,12 +295,12 @@ function scoreVoice(v: SpeechSynthesisVoice) {
 export const SPEECH_RATES = [0.75, 0.9, 1] as const
 export type SpeechRate = (typeof SPEECH_RATES)[number]
 const RATE_KEY = 'tutor_speech_rate'
-const isRate = (v: unknown): v is SpeechRate => SPEECH_RATES.includes(v as SpeechRate)
+export const isSpeechRate = (v: unknown): v is SpeechRate => SPEECH_RATES.includes(v as SpeechRate)
 
 let speechRate: SpeechRate = (() => {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(RATE_KEY) ?? 'null')
-    return isRate(v) ? v : 1
+    return isSpeechRate(v) ? v : 1
   } catch {
     return 1
   }

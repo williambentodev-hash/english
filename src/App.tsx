@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import ApiKeyModal from './components/ApiKeyModal'
+import AuthModal from './components/AuthModal'
 import ChatInput from './components/ChatInput'
 import LevelPicker from './components/LevelPicker'
 import SpeedPicker from './components/SpeedPicker'
 import MessageBubble, { TypingIndicator } from './components/MessageBubble'
+import ProgressDashboard from './components/ProgressDashboard'
 import { getApiKey, isLevel, sendMessage, setApiKey, type ChatMessage, type Level } from './services/groq'
 import { isBoolean, usePersistentState } from './services/prefs'
-import { ttsSupported } from './services/speech'
+import { ttsSupported, useSpeechRate } from './services/speech'
+import { useAuth } from './services/auth'
+import { useProfileSync } from './services/profileSync'
+import { newSessionId, recordPhrase } from './services/stats'
 
 const GREETING_TEXT = "Hi there! 👋 I'm your English tutor. How was your day today?"
 const GREETING_TRANSLATION = 'Olá! 👋 Eu sou seu professor de inglês. Como foi o seu dia hoje?'
@@ -21,9 +26,18 @@ const greeting = (blind: boolean): ChatMessage => ({
 export default function App() {
   const [apiKey, setKey] = useState<string | null>(() => getApiKey())
   const [showKeyModal, setShowKeyModal] = useState(false)
+  const [showProgress, setShowProgress] = useState(false)
+  const [showAccount, setShowAccount] = useState(false)
+  const { enabled: cloud, ready: authReady, user } = useAuth()
+  const uid = user?.uid ?? null
+  // com Firebase configurado, o app só libera depois do login (e-mail ou convidado)
+  const needAuth = cloud && authReady && !user
+  const sessionId = useRef(newSessionId())
   const [level, setLevel] = usePersistentState<Level>('tutor_level', 'intermediate', isLevel)
   const [blindPref, setBlind] = usePersistentState('tutor_blind_listening', false, isBoolean)
   const blind = blindPref && ttsSupported
+  const speechRate = useSpeechRate()
+  useProfileSync(user, { level, blindListening: blindPref, speechRate }, { setLevel, setBlind })
   const [messages, setMessages] = useState<ChatMessage[]>(() => [greeting(blind)])
   const [session, setSession] = useState(0) // remonta as bolhas a cada nova conversa
   const [loading, setLoading] = useState(false)
@@ -43,6 +57,7 @@ export default function App() {
   function newConversation() {
     setMessages([greeting(blind)])
     setSession((s) => s + 1)
+    sessionId.current = newSessionId()
     setError(null)
   }
 
@@ -65,6 +80,7 @@ export default function App() {
       const history = next[0].role === 'assistant' ? next.slice(1) : next
       const { reply, feedback, translation } = await sendMessage(history, apiKey, level)
       setMessages((m) => [...m, { role: 'assistant', content: reply, feedback, translation, hidden: blind }])
+      void recordPhrase(uid, sessionId.current, level, text, feedback, reply)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro inesperado.')
       // remove a mensagem não respondida para manter a alternância user/assistant
@@ -78,22 +94,46 @@ export default function App() {
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-30 border-b border-zinc-900/5 bg-white/80 backdrop-blur-md pt-[env(safe-area-inset-top)]">
         <div className="mx-auto flex h-14 max-w-2xl items-center justify-between px-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 to-blue-600 text-sm text-white">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="hidden h-8 w-8 shrink-0 items-center sm:flex justify-center rounded-full bg-gradient-to-br from-blue-400 to-blue-600 text-sm text-white">
               T
             </div>
-            <div className="leading-tight">
-              <h1 className="text-[15px] font-semibold tracking-tight">English Tutor</h1>
+            <div className="min-w-0 leading-tight">
+              <h1 className="truncate text-[15px] font-semibold tracking-tight">English Tutor</h1>
               <p className="text-xs text-zinc-500">{loading ? 'digitando…' : blind ? 'modo escuta' : 'online'}</p>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center sm:gap-1">
             <button
               onClick={newConversation}
-              className="min-h-11 rounded-full px-3 text-sm text-blue-500 transition-all duration-300 ease-out hover:bg-zinc-100 active:scale-95"
+              className="min-h-11 rounded-full px-2 sm:px-3 text-sm text-blue-500 transition-all duration-300 ease-out hover:bg-zinc-100 active:scale-95"
             >
               Nova
             </button>
+            <button
+              onClick={() => setShowProgress(true)}
+              aria-label="Evolução"
+              title="Evolução"
+              className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-500 transition-all duration-300 ease-out hover:bg-zinc-100 active:scale-95"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 3v18h18" />
+                <path d="m7 15 4-4 3 3 5-6" />
+              </svg>
+            </button>
+            {cloud && user && (
+              <button
+                onClick={() => setShowAccount(true)}
+                aria-label="Conta"
+                title={user.isAnonymous ? 'Convidado' : user.email ?? 'Conta'}
+                className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-500 transition-all duration-300 ease-out hover:bg-zinc-100 active:scale-95"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 21a8 8 0 0 1 16 0" />
+                </svg>
+              </button>
+            )}
             {ttsSupported && <SpeedPicker />}
             {ttsSupported && (
               <button
@@ -149,7 +189,12 @@ export default function App() {
 
       <ChatInput disabled={loading} onSend={handleSend} />
 
-      {(!apiKey || showKeyModal) && (
+      {showProgress && <ProgressDashboard uid={uid} onClose={() => setShowProgress(false)} />}
+
+      {needAuth && <AuthModal user={null} />}
+      {showAccount && user && <AuthModal user={user} onClose={() => setShowAccount(false)} />}
+
+      {!needAuth && (!cloud || authReady) && (!apiKey || showKeyModal) && (
         <ApiKeyModal
           initialKey={apiKey ?? ''}
           onSave={saveKey}

@@ -1,0 +1,27 @@
+rules_version = '2';
+
+// Cada usuário (inclusive convidado/anônimo) só lê e escreve os próprios documentos.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function owns() { return signedIn() && resource.data.uid == request.auth.uid; }
+    function creatingOwn() { return signedIn() && request.resource.data.uid == request.auth.uid; }
+
+    match /users/{uid} {
+      allow read, delete: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid && request.resource.data.uid == uid;
+    }
+
+    match /sessions/{id} {
+      allow read, delete: if owns();
+      // o id do documento começa com o uid do dono
+      allow create: if creatingOwn() && id.matches(request.auth.uid + '_.*');
+      allow update: if owns() && request.resource.data.uid == request.auth.uid;
+    }
+
+    match /feedbacks/{id} {
+      allow read, delete: if owns();
+      allow create: if creatingOwn();
+    }
+  }
+}
