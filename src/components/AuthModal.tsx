@@ -61,7 +61,11 @@ export default function AuthModal({ user, onClose }: Props) {
       ? guest
         ? 'Você está como convidado. Crie uma conta para não perder sua evolução ao trocar de aparelho.'
         : user.email
-      : 'Sua evolução, correções e preferências ficam salvas na nuvem e sincronizadas entre aparelhos.'
+      : guest && mode === 'signin'
+        ? 'Ao entrar em uma conta existente, a evolução deste convidado fica para trás. Para mantê-la, use "Criar conta".'
+        : !user
+          ? 'Sem conexão com a nuvem no momento: sua evolução está sendo salva neste aparelho e será enviada quando você entrar.'
+          : 'Sua evolução, correções e preferências ficam salvas na nuvem e sincronizadas entre aparelhos.'
 
   return (
     <div
@@ -85,14 +89,21 @@ export default function AuthModal({ user, onClose }: Props) {
 
         {user && !showForm ? (
           <div className="space-y-2">
-            {guest && (
-              <button onClick={() => { setMode('signup'); setShowForm(true) }} className={primaryClass}>
-                Criar conta
+            {guest ? (
+              <>
+                <button onClick={() => { setMode('signup'); setShowForm(true) }} className={primaryClass}>
+                  Criar conta
+                </button>
+                {/* sem "Sair" para convidado: sairia para um novo convidado e o histórico ficaria inacessível */}
+                <button onClick={() => { setMode('signin'); setShowForm(true) }} className={secondaryClass}>
+                  Já tenho conta
+                </button>
+              </>
+            ) : (
+              <button disabled={busy} onClick={() => run(signOut)} className={`${secondaryClass} !text-red-500`}>
+                Sair
               </button>
             )}
-            <button disabled={busy} onClick={() => run(signOut)} className={`${secondaryClass} !text-red-500`}>
-              Sair
-            </button>
             {onClose && (
               <button onClick={onClose} className="block w-full min-h-11 text-sm font-medium text-blue-500">
                 OK

@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { LEVELS, type Level } from '../services/groq'
-import { fetchStats, resetStats, sessionAverage, type SessionStat, type Stats } from '../services/stats'
+import { resetStats, sessionAverage, subscribeStats, type SessionStat, type Stats, type StatsView } from '../services/stats'
 
 const CHART_SESSIONS = 12
+const CORRECTIONS_PAGE = 15
 const levelLabel = (l: Level) => LEVELS.find((x) => x.id === l)?.label ?? l
 
 const fmtDate = (iso: string) =>
@@ -174,31 +175,42 @@ function ScoreChart({ points }: { points: Point[] }) {
   )
 }
 
+/* ---------------- Status da sincronização ---------------- */
+
+function SyncStatus({ view, cloudUser }: { view: StatsView; cloudUser: boolean }) {
+  const { source, pending } = view
+  const waiting = pending > 0 ? ` · ${pending} ${pending === 1 ? 'frase aguardando' : 'frases aguardando'} envio` : ''
+  const [dot, text] =
+    !cloudUser
+      ? ['bg-zinc-300', 'Salvo só neste aparelho' + waiting]
+      : source === 'cloud'
+        ? pending
+          ? ['bg-amber-400', 'Sincronizando' + waiting]
+          : ['bg-emerald-500', 'Sincronizado na nuvem · tempo real']
+        : ['bg-amber-400', 'Offline · mostrando dados salvos neste aparelho' + waiting]
+  return (
+    <p className="flex items-center justify-center gap-1.5 text-[11px] text-zinc-400" aria-live="polite">
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden />
+      {text}
+    </p>
+  )
+}
+
 /* ---------------- Painel ---------------- */
 
 const NO_STATS: Stats = { sessions: [], corrections: [] }
 
 export default function ProgressDashboard({ uid, onClose }: { uid: string | null; onClose: () => void }) {
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [view, setView] = useState<StatsView | null>(null)
   const [busy, setBusy] = useState(false)
+  const [showAll, setShowAll] = useState(false)
 
+  // tempo real: Firestore + fila offline + localStorage
   useEffect(() => {
-    let cancelled = false
-    setStats(null)
-    setLoadError(null)
-    fetchStats(uid)
-      .then((s) => !cancelled && setStats(s))
-      .catch((e) => {
-        console.warn('[stats] falha ao carregar', e)
-        if (cancelled) return
-        setLoadError('Não foi possível carregar sua evolução. Verifique a conexão.')
-        setStats(NO_STATS)
-      })
-    return () => {
-      cancelled = true
-    }
+    setView(null)
+    return subscribeStats(uid, setView)
   }, [uid])
+  const stats = view?.stats ?? null
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -241,7 +253,6 @@ export default function ProgressDashboard({ uid, onClose }: { uid: string | null
     setBusy(true)
     try {
       await resetStats(uid)
-      setStats(NO_STATS)
     } catch (e) {
       console.warn('[stats] falha ao apagar', e)
       alert('Não foi possível apagar o histórico. Tente novamente.')
@@ -274,11 +285,7 @@ export default function ProgressDashboard({ uid, onClose }: { uid: string | null
       </header>
 
       <div className="mx-auto max-w-2xl space-y-3 px-4 pt-4 pb-[calc(2rem+env(safe-area-inset-bottom))]">
-        {loadError && (
-          <p role="alert" className="rounded-2xl bg-red-50 px-4 py-2 text-center text-sm text-red-600 ring-1 ring-red-100">
-            {loadError}
-          </p>
-        )}
+        {view && <SyncStatus view={view} cloudUser={!!uid} />}
         {loading ? (
           <div className="flex justify-center pt-24" aria-live="polite">
             <span className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-200 border-t-blue-500" />
@@ -325,17 +332,22 @@ export default function ProgressDashboard({ uid, onClose }: { uid: string | null
               </Card>
             )}
 
-            <Card title="Últimas correções">
+            <Card title={`Erros e correções${data.corrections.length ? ` · ${data.corrections.length}` : ''}`}>
               {data.corrections.length === 0 ? (
                 <p className="py-2 text-sm text-zinc-400">Nenhuma correção ainda. Continue assim! 🎉</p>
               ) : (
                 <ul className="-mx-1 mt-1 divide-y divide-zinc-900/5">
-                  {data.corrections.slice(0, 15).map((c, i) => (
+                  {(showAll ? data.corrections : data.corrections.slice(0, CORRECTIONS_PAGE)).map((c, i) => (
                     <li key={c.date + i} className="space-y-1.5 px-1 py-3">
                       <div className="flex items-center gap-2 text-[11px] text-zinc-400">
                         <span>{fmtDate(c.date)}</span>
                         <span aria-hidden>·</span>
                         <span>{levelLabel(c.level)}</span>
+                        {c.score != null && (
+                          <span className="ml-auto rounded-full bg-zinc-100 px-2 py-0.5 font-medium text-zinc-600 tabular-nums">
+                            {c.score}/10
+                          </span>
+                        )}
                       </div>
                       <p className="text-[13.5px] text-zinc-400 line-through decoration-zinc-300">{c.said}</p>
                       <p className="text-[13.5px] leading-snug text-zinc-700">{c.correction}</p>
@@ -343,6 +355,14 @@ export default function ProgressDashboard({ uid, onClose }: { uid: string | null
                     </li>
                   ))}
                 </ul>
+              )}
+              {data.corrections.length > CORRECTIONS_PAGE && (
+                <button
+                  onClick={() => setShowAll((v) => !v)}
+                  className="mt-1 block min-h-11 w-full rounded-2xl text-sm font-medium text-blue-500 transition-all duration-300 ease-out hover:bg-zinc-50 active:scale-[0.98]"
+                >
+                  {showAll ? 'Mostrar menos' : `Ver todas (${data.corrections.length})`}
+                </button>
               )}
             </Card>
 

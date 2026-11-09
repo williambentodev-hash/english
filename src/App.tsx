@@ -11,7 +11,7 @@ import { isBoolean, usePersistentState } from './services/prefs'
 import { ttsSupported, useSpeechRate } from './services/speech'
 import { useAuth } from './services/auth'
 import { useProfileSync } from './services/profileSync'
-import { newSessionId, recordPhrase } from './services/stats'
+import { newSessionId, recordPhrase, usePendingSync } from './services/stats'
 
 const GREETING_TEXT = "Hi there! 👋 I'm your English tutor. How was your day today?"
 const GREETING_TRANSLATION = 'Olá! 👋 Eu sou seu professor de inglês. Como foi o seu dia hoje?'
@@ -29,9 +29,9 @@ export default function App() {
   const [showProgress, setShowProgress] = useState(false)
   const [showAccount, setShowAccount] = useState(false)
   const { enabled: cloud, ready: authReady, user } = useAuth()
+  // login anônimo automático na inicialização; se falhar (offline), uid fica null e o app segue local
   const uid = user?.uid ?? null
-  // com Firebase configurado, o app só libera depois do login (e-mail ou convidado)
-  const needAuth = cloud && authReady && !user
+  usePendingSync(uid)
   const sessionId = useRef(newSessionId())
   const [level, setLevel] = usePersistentState<Level>('tutor_level', 'intermediate', isLevel)
   const [blindPref, setBlind] = usePersistentState('tutor_blind_listening', false, isBoolean)
@@ -121,11 +121,11 @@ export default function App() {
                 <path d="m7 15 4-4 3 3 5-6" />
               </svg>
             </button>
-            {cloud && user && (
+            {cloud && authReady && (
               <button
                 onClick={() => setShowAccount(true)}
                 aria-label="Conta"
-                title={user.isAnonymous ? 'Convidado' : user.email ?? 'Conta'}
+                title={!user ? 'Entrar' : user.isAnonymous ? 'Convidado' : user.email ?? 'Conta'}
                 className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-500 transition-all duration-300 ease-out hover:bg-zinc-100 active:scale-95"
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
@@ -191,10 +191,9 @@ export default function App() {
 
       {showProgress && <ProgressDashboard uid={uid} onClose={() => setShowProgress(false)} />}
 
-      {needAuth && <AuthModal user={null} />}
-      {showAccount && user && <AuthModal user={user} onClose={() => setShowAccount(false)} />}
+      {showAccount && <AuthModal user={user} onClose={() => setShowAccount(false)} />}
 
-      {!needAuth && (!cloud || authReady) && (!apiKey || showKeyModal) && (
+      {(!cloud || authReady) && (!apiKey || showKeyModal) && (
         <ApiKeyModal
           initialKey={apiKey ?? ''}
           onSave={saveKey}

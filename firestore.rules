@@ -21,7 +21,9 @@ service cloud.firestore {
 
     match /feedbacks/{id} {
       allow read, delete: if owns();
-      allow create: if creatingOwn();
+      // id = {uid}_{fraseId}; reenviar a fila offline regrava o mesmo documento
+      allow create: if creatingOwn() && id.matches(request.auth.uid + '_.*');
+      allow update: if owns() && request.resource.data.uid == request.auth.uid;
     }
   }
 }

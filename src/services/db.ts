@@ -1,29 +1,32 @@
 // Persistência no Firestore. Coleções (todas com o campo `uid` do dono, exigido pelas regras):
 //   users/{uid}                          nível de fluência e configurações
-//   sessions/{uid}_{sessionId}_{level}   histórico da conversa, total de frases e média de scores
-//   feedbacks/{auto}                     correção em português, versão nativa e nota de cada frase
+//   sessions/{uid}_{sessionId}_{level}   histórico da conversa, total de frases e soma dos scores
+//   feedbacks/{uid}_{phraseId}           frase do aluno, score, correção em português e versão nativa
 import {
   arrayUnion,
   collection,
   doc,
   getDoc,
   getDocs,
+  increment,
   limit,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   setDoc,
   where,
   writeBatch,
-  addDoc,
+  type FirestoreError,
+  type Query,
   type QueryDocumentSnapshot,
+  type QuerySnapshot,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { isLevel, type Feedback, type Level } from './groq'
 import type { CorrectionEntry, SessionStat, Stats } from './stats'
 
 const MAX_SESSIONS = 200
-const MAX_CORRECTIONS = 50
 const FEEDBACK_FETCH = 200
 
 function firestore() {
@@ -63,64 +66,66 @@ export async function saveUserProfile(
 
 /* ---------------- sessions + feedbacks ---------------- */
 
-// Contadores da sessão em andamento. Uma sessão pertence a uma única aba, então manter os
-// totais em memória permite gravar valores absolutos (inclusive a média) sem transação,
-// o que também funciona offline.
-const sessionCache = new Map<string, { date: string; phrases: number; scoreSum: number; scored: number }>()
+/** Uma frase do aluno com a avaliação da IA. `id` é único e gerado no aparelho. */
+export interface PhraseRecord {
+  id: string
+  sessionId: string
+  level: Level
+  said: string
+  feedback: Feedback | null
+  reply: string
+  /** ISO de quando a frase foi enviada */
+  at: string
+}
 
 const sessionDocId = (uid: string, sessionId: string, level: Level) => `${uid}_${sessionId}_${level}`
+export const feedbackDocId = (uid: string, phraseId: string) => `${uid}_${phraseId}`
 
-export async function recordPhraseRemote(
-  uid: string,
-  sessionId: string,
-  level: Level,
-  said: string,
-  feedback: Feedback | null,
-  reply: string,
-) {
+/** Início da conversa, extraído do id da sessão (timestamp em base 36); determinístico entre reenvios. */
+function sessionStart(sessionId: string, fallback: string) {
+  const ms = parseInt(sessionId.split('-')[0], 36)
+  return Number.isFinite(ms) && ms > 1.5e12 && ms < 4e12 ? new Date(ms).toISOString() : fallback
+}
+
+/**
+ * Grava a frase em uma escrita atômica: o feedback (id determinístico, então reenviar não duplica)
+ * e os contadores da sessão (incrementos, sem depender de estado em memória — funciona ao
+ * reenviar a fila offline depois de recarregar a página).
+ */
+export async function recordPhraseRemote(uid: string, r: PhraseRecord) {
   const fs = firestore()
-  const now = new Date().toISOString()
-  const id = sessionDocId(uid, sessionId, level)
-
-  const s = sessionCache.get(id) ?? { date: now, phrases: 0, scoreSum: 0, scored: 0 }
-  s.phrases += 1
-  if (feedback?.score != null) {
-    s.scoreSum += feedback.score
-    s.scored += 1
-  }
-  sessionCache.set(id, s)
-
-  await Promise.all([
-    setDoc(
-      doc(fs, 'sessions', id),
-      {
-        uid,
-        sessionId,
-        level,
-        date: s.date,
-        updatedAt: now,
-        phrases: s.phrases,
-        scoreSum: s.scoreSum,
-        scored: s.scored,
-        averageScore: s.scored ? s.scoreSum / s.scored : null,
-        messages: arrayUnion(
-          { role: 'user', content: said, at: now },
-          { role: 'assistant', content: reply, at: now },
-        ),
-      },
-      { merge: true },
-    ),
-    addDoc(collection(fs, 'feedbacks'), {
+  const score = r.feedback?.score ?? null
+  const batch = writeBatch(fs)
+  batch.set(
+    doc(fs, 'sessions', sessionDocId(uid, r.sessionId, r.level)),
+    {
       uid,
-      sessionId,
-      level,
-      date: now,
-      said,
-      score: feedback?.score ?? null,
-      correction: feedback?.correction ?? null,
-      native: feedback?.native ?? '',
-    }),
-  ])
+      sessionId: r.sessionId,
+      level: r.level,
+      date: sessionStart(r.sessionId, r.at),
+      updatedAt: r.at,
+      phrases: increment(1),
+      scoreSum: increment(score ?? 0),
+      scored: increment(score != null ? 1 : 0),
+      messages: arrayUnion(
+        { role: 'user', content: r.said, at: r.at },
+        { role: 'assistant', content: r.reply, at: r.at },
+      ),
+    },
+    { merge: true },
+  )
+  batch.set(doc(fs, 'feedbacks', feedbackDocId(uid, r.id)), {
+    uid,
+    sessionId: r.sessionId,
+    level: r.level,
+    date: r.at,
+    said: r.said,
+    score,
+    correction: r.feedback?.correction ?? null,
+    native: r.feedback?.native ?? '',
+    createdAt: serverTimestamp(),
+  })
+  await batch.commit()
 }
 
 const toSession = (d: QueryDocumentSnapshot): SessionStat | null => {
@@ -135,41 +140,88 @@ const toCorrection = (d: QueryDocumentSnapshot): CorrectionEntry | null => {
   const x = d.data()
   if (typeof x.correction !== 'string' || !x.correction || !isLevel(x.level)) return null
   if (typeof x.date !== 'string' || typeof x.said !== 'string') return null
-  return { date: x.date, level: x.level, said: x.said, correction: x.correction, native: String(x.native ?? '') }
-}
-
-async function fetchFeedbackDocs(uid: string) {
-  const col = collection(firestore(), 'feedbacks')
-  try {
-    // exige o índice composto (uid ASC, date DESC) de firestore.indexes.json
-    return (await getDocs(query(col, where('uid', '==', uid), orderBy('date', 'desc'), limit(FEEDBACK_FETCH)))).docs
-  } catch (e) {
-    if ((e as { code?: string }).code !== 'failed-precondition') throw e
-    console.warn('[firestore] índice de feedbacks ausente; ordenando no cliente.')
-    return (await getDocs(query(col, where('uid', '==', uid)))).docs
+  return {
+    date: x.date,
+    level: x.level,
+    said: x.said,
+    correction: x.correction,
+    native: String(x.native ?? ''),
+    score: typeof x.score === 'number' ? x.score : null,
   }
 }
 
-export async function loadStatsRemote(uid: string): Promise<Stats> {
+export interface RemoteStats extends Stats {
+  /** dados vindos do cache local do Firestore (offline ou ainda sincronizando) */
+  fromCache: boolean
+  /** ids dos documentos de feedback recebidos (para não contar duas vezes a fila offline) */
+  feedbackIds: Set<string>
+}
+
+/**
+ * Acompanha em tempo real as sessões e os feedbacks do usuário. `onData` é chamado a cada
+ * mudança (inclusive escritas locais ainda não confirmadas pelo servidor).
+ */
+export function subscribeStatsRemote(
+  uid: string,
+  onData: (s: RemoteStats) => void,
+  onError: (e: FirestoreError) => void,
+) {
   const fs = firestore()
-  const [sessionDocs, feedbackDocs] = await Promise.all([
-    getDocs(query(collection(fs, 'sessions'), where('uid', '==', uid))).then((r) => r.docs),
-    fetchFeedbackDocs(uid),
-  ])
+  const col = collection(fs, 'feedbacks')
+  let sessions: QuerySnapshot | null = null
+  let feedbacks: QuerySnapshot | null = null
+  let stopFeedbacks = () => {}
 
-  const sessions = sessionDocs
-    .map(toSession)
-    .filter((s): s is SessionStat => s !== null)
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(-MAX_SESSIONS)
+  const emit = () => {
+    if (!sessions || !feedbacks) return
+    onData({
+      sessions: sessions.docs
+        .map(toSession)
+        .filter((s): s is SessionStat => s !== null)
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .slice(-MAX_SESSIONS),
+      corrections: feedbacks.docs
+        .map(toCorrection)
+        .filter((c): c is CorrectionEntry => c !== null)
+        .sort((a, b) => b.date.localeCompare(a.date)),
+      fromCache: sessions.metadata.fromCache || feedbacks.metadata.fromCache,
+      feedbackIds: new Set(feedbacks.docs.map((d) => d.id)),
+    })
+  }
 
-  const corrections = feedbackDocs
-    .map(toCorrection)
-    .filter((c): c is CorrectionEntry => c !== null)
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, MAX_CORRECTIONS)
+  const listenFeedbacks = (q: Query, ordered: boolean) => {
+    stopFeedbacks = onSnapshot(
+      q,
+      { includeMetadataChanges: true },
+      (snap) => {
+        feedbacks = snap
+        emit()
+      },
+      (e) => {
+        // sem o índice composto (uid ASC, date DESC) de firestore.indexes.json: ordena no cliente
+        if (ordered && e.code === 'failed-precondition') {
+          console.warn('[firestore] índice de feedbacks ausente; ordenando no cliente.')
+          listenFeedbacks(query(col, where('uid', '==', uid)), false)
+        } else onError(e)
+      },
+    )
+  }
 
-  return { sessions, corrections }
+  const stopSessions = onSnapshot(
+    query(collection(fs, 'sessions'), where('uid', '==', uid)),
+    { includeMetadataChanges: true },
+    (snap) => {
+      sessions = snap
+      emit()
+    },
+    onError,
+  )
+  listenFeedbacks(query(col, where('uid', '==', uid), orderBy('date', 'desc'), limit(FEEDBACK_FETCH)), true)
+
+  return () => {
+    stopSessions()
+    stopFeedbacks()
+  }
 }
 
 /** Apaga todas as sessões e feedbacks do usuário (mantém o perfil). */
@@ -185,5 +237,4 @@ export async function clearStatsRemote(uid: string) {
     refs.slice(i, i + 450).forEach((r) => batch.delete(r))
     await batch.commit()
   }
-  for (const key of sessionCache.keys()) if (key.startsWith(`${uid}_`)) sessionCache.delete(key)
 }

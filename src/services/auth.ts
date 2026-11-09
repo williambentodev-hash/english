@@ -1,5 +1,6 @@
-// Firebase Auth: e-mail/senha ou convidado (anônimo).
-import { useEffect, useState } from 'react'
+// Firebase Auth. Sem sessão salva, o app entra automaticamente como convidado (anônimo);
+// depois o usuário pode transformar o convidado em conta de e-mail sem perder o histórico.
+import { useSyncExternalStore } from 'react'
 import {
   EmailAuthProvider,
   createUserWithEmailAndPassword,
@@ -8,6 +9,7 @@ import {
   signInAnonymously,
   signInWithEmailAndPassword,
   signOut as fbSignOut,
+  type Auth,
   type User,
 } from 'firebase/auth'
 import { auth, firebaseReady } from '../lib/firebase'
@@ -15,31 +17,58 @@ import { auth, firebaseReady } from '../lib/firebase'
 export interface AuthState {
   /** Firebase configurado e inicializado */
   enabled: boolean
-  /** estado inicial do Auth já conhecido */
+  /** estado do Auth já conhecido (logado, ou login automático falhou e o app segue em modo local) */
   ready: boolean
   user: User | null
+  /** código do erro do login automático, se houve */
+  error: string | null
 }
 
-// avisa os hooks quando o usuário muda sem trocar de sessão (ex.: convidado vira conta)
-const refreshListeners = new Set<() => void>()
+/* ---------------- Store único (um listener para o app inteiro) ---------------- */
+
+let state: AuthState = { enabled: firebaseReady(), ready: !firebaseReady(), user: null, error: null }
+const listeners = new Set<() => void>()
+
+function emit(patch: Partial<AuthState>) {
+  state = { ...state, ...patch }
+  listeners.forEach((l) => l())
+}
+
+let autoSignIn: Promise<void> | null = null
+
+/** Login anônimo automático. Falhando (offline, provedor desativado), o app usa o localStorage. */
+function ensureSignedIn(a: Auth) {
+  if (a.currentUser || autoSignIn) return
+  autoSignIn = signInAnonymously(a)
+    .then(() => undefined) // onAuthStateChanged entrega o usuário
+    .catch((e) => {
+      console.warn('[auth] login anônimo falhou; usando só o localStorage até reconectar.', e)
+      emit({ ready: true, user: null, error: (e as { code?: string })?.code ?? 'unknown' })
+    })
+    .finally(() => {
+      autoSignIn = null
+    })
+}
+
+if (auth) {
+  const a = auth
+  onAuthStateChanged(a, (user) => {
+    if (user) return emit({ ready: true, user, error: null })
+    // sem sessão salva (primeiro acesso ou após "Sair"): entra como convidado
+    emit({ user: null })
+    ensureSignedIn(a)
+  })
+  // abriu offline e o login falhou: tenta de novo quando a conexão voltar
+  window.addEventListener('online', () => ensureSignedIn(a))
+}
+
+const subscribe = (l: () => void) => {
+  listeners.add(l)
+  return () => listeners.delete(l)
+}
 
 export function useAuth(): AuthState {
-  const enabled = firebaseReady()
-  const [state, setState] = useState<AuthState>({ enabled, ready: !enabled, user: null })
-
-  useEffect(() => {
-    if (!auth) return
-    const a = auth
-    const update = () => setState({ enabled: true, ready: true, user: a.currentUser })
-    refreshListeners.add(update)
-    const unsub = onAuthStateChanged(a, update)
-    return () => {
-      refreshListeners.delete(update)
-      unsub()
-    }
-  }, [])
-
-  return state
+  return useSyncExternalStore(subscribe, () => state)
 }
 
 function requireAuth() {
@@ -55,9 +84,9 @@ export async function signInWithEmail(email: string, password: string) {
 export async function signUpWithEmail(email: string, password: string) {
   const a = requireAuth()
   if (a.currentUser?.isAnonymous) {
-    await linkWithCredential(a.currentUser, EmailAuthProvider.credential(email.trim(), password))
+    const { user } = await linkWithCredential(a.currentUser, EmailAuthProvider.credential(email.trim(), password))
     // linkWithCredential não dispara onAuthStateChanged: avisa os hooks manualmente
-    refreshListeners.forEach((l) => l())
+    emit({ user, error: null })
     return
   }
   await createUserWithEmailAndPassword(a, email.trim(), password)

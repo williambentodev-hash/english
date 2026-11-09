@@ -1,7 +1,7 @@
 // Inicialização do Firebase (Auth + Firestore) a partir das variáveis de ambiente do Vite.
 // Sem as chaves obrigatórias, `firebaseEnabled` é false e o app usa só o localStorage.
 import { initializeApp, type FirebaseApp } from 'firebase/app'
-import { getAuth, type Auth } from 'firebase/auth'
+import { browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, type Auth } from 'firebase/auth'
 import {
   initializeFirestore,
   persistentLocalCache,
@@ -33,7 +33,9 @@ let db: Firestore | null = null
 if (firebaseEnabled) {
   try {
     app = initializeApp(config)
-    auth = getAuth(app)
+    // sessão salva no aparelho (IndexedDB, com localStorage de reserva): o usuário continua
+    // logado ao recarregar, inclusive offline
+    auth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] })
     // cache em IndexedDB: leituras offline e escritas enfileiradas até a conexão voltar
     let cache
     try {
