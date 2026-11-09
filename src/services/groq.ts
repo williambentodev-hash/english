@@ -210,3 +210,63 @@ export async function sendMessage(
   if (!text) throw new AIError('Resposta vazia do modelo. Tente de novo.')
   return parseTutorReply(text)
 }
+
+/* ---------------- Tradução rápida de termo (Vocabulário) ---------------- */
+
+export interface TermTranslation {
+  /** tradução para o português no sentido usado na frase */
+  translation: string
+  /** forma de dicionário em inglês (ex.: "went" → "go"), quando diferente do termo */
+  base: string | null
+}
+
+const termCache = new Map<string, Promise<TermTranslation>>()
+
+/** Traduz um termo em inglês para o português considerando a frase onde apareceu. */
+export function translateTerm(term: string, context: string, apiKey: string): Promise<TermTranslation> {
+  const key = `${term.toLowerCase()}|${context}`
+  const cached = termCache.get(key)
+  if (cached) return cached
+
+  const p = (async () => {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a concise English → Brazilian Portuguese dictionary.
+Translate the English TERM exactly as it is used in the SENTENCE (meaning in context, not every possible meaning).
+Respond ONLY with JSON: {"translation":<short Brazilian Portuguese translation, 1-5 words>,"base":<English dictionary form of the term, or null if it is already the dictionary form>}`,
+          },
+          { role: 'user', content: `TERM: ${term}\nSENTENCE: ${context}` },
+        ],
+        response_format: { type: 'json_object' },
+        max_completion_tokens: 256,
+        reasoning_effort: 'low',
+        include_reasoning: false,
+      }),
+    })
+    if (!res.ok) {
+      if (res.status === 401) throw new AIError('API key inválida.', 401)
+      if (res.status === 429) throw new AIError('Limite atingido. Aguarde alguns segundos.', 429)
+      throw new AIError(`Erro ${res.status}`, res.status)
+    }
+    const data = await res.json()
+    const text: string = data?.choices?.[0]?.message?.content ?? ''
+    const start = text.indexOf('{')
+    const end = text.lastIndexOf('}')
+    const parsed = JSON.parse(start >= 0 && end > start ? text.slice(start, end + 1) : text)
+    const translation = str(parsed?.translation)
+    if (!translation) throw new AIError('Não foi possível traduzir.')
+    const base = str(parsed?.base)
+    return { translation, base: base && base.toLowerCase() !== term.toLowerCase() ? base : null }
+  })()
+
+  termCache.set(key, p)
+  // erros não ficam em cache: permite tentar de novo
+  p.catch(() => termCache.delete(key))
+  return p
+}

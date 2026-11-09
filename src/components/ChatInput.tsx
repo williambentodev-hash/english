@@ -72,7 +72,8 @@ export default function ChatInput({ disabled, onSend }: Props) {
   }
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-900/5 bg-white/80 backdrop-blur-md">
+    // --sidebar-w (definida no App) desloca a barra quando a sidebar fixa do desktop está aberta
+    <div className="fixed right-0 bottom-0 left-[var(--sidebar-w,0px)] z-40 border-t border-zinc-900/5 bg-white/80 backdrop-blur-md transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]">
       {mic.listening && (
         <div
           role="status"

@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { LEVELS, type Level } from '../services/groq'
+import SegmentedControl from './SegmentedControl'
+import VocabularyList from './VocabularyList'
 import { resetStats, sessionAverage, subscribeStats, type SessionStat, type Stats, type StatsView } from '../services/stats'
 
 const CHART_SESSIONS = 12
@@ -200,7 +202,22 @@ function SyncStatus({ view, cloudUser }: { view: StatsView; cloudUser: boolean }
 
 const NO_STATS: Stats = { sessions: [], corrections: [] }
 
-export default function ProgressDashboard({ uid, onClose }: { uid: string | null; onClose: () => void }) {
+export type DashboardTab = 'progress' | 'vocabulary'
+
+const TABS = [
+  { id: 'progress', label: 'Evolução' },
+  { id: 'vocabulary', label: 'Vocabulário' },
+] as const
+
+interface DashboardProps {
+  uid: string | null
+  /** aba aberta ao entrar (Evolução ou Vocabulário) */
+  initialTab?: DashboardTab
+  onClose: () => void
+}
+
+export default function ProgressDashboard({ uid, initialTab = 'progress', onClose }: DashboardProps) {
+  const [tab, setTab] = useState<DashboardTab>(initialTab)
   const [view, setView] = useState<StatsView | null>(null)
   const [busy, setBusy] = useState(false)
   const [showAll, setShowAll] = useState(false)
@@ -273,7 +290,7 @@ export default function ProgressDashboard({ uid, onClose }: { uid: string | null
     >
       <header className="sticky top-0 z-10 border-b border-zinc-900/5 bg-zinc-50/80 backdrop-blur-md pt-[env(safe-area-inset-top)]">
         <div className="mx-auto flex h-14 max-w-2xl items-center justify-between px-4">
-          <h2 id="progress-title" className="text-[17px] font-semibold tracking-tight">Evolução</h2>
+          <h2 id="progress-title" className="text-[17px] font-semibold tracking-tight">Seu progresso</h2>
           <button
             onClick={onClose}
             autoFocus
@@ -282,9 +299,16 @@ export default function ProgressDashboard({ uid, onClose }: { uid: string | null
             OK
           </button>
         </div>
+        <div className="mx-auto max-w-2xl px-4 pb-3">
+          <SegmentedControl label="Seção" options={TABS} value={tab} onChange={setTab} />
+        </div>
       </header>
 
       <div className="mx-auto max-w-2xl space-y-3 px-4 pt-4 pb-[calc(2rem+env(safe-area-inset-bottom))]">
+        {tab === 'vocabulary' ? (
+          <VocabularyList uid={uid} />
+        ) : (
+        <>
         {view && <SyncStatus view={view} cloudUser={!!uid} />}
         {loading ? (
           <div className="flex justify-center pt-24" aria-live="polite">
@@ -374,6 +398,8 @@ export default function ProgressDashboard({ uid, onClose }: { uid: string | null
               {busy ? 'Apagando…' : 'Apagar histórico'}
             </button>
           </>
+        )}
+        </>
         )}
       </div>
     </div>

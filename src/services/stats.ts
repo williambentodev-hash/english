@@ -9,6 +9,7 @@ import type { Feedback, Level } from './groq'
 import { isLevel } from './groq'
 import { firebaseReady } from '../lib/firebase'
 import { clearStatsRemote, feedbackDocId, recordPhraseRemote, subscribeStatsRemote, type PhraseRecord } from './db'
+import { appendLocalTurn } from './chatStore'
 
 const STORAGE = 'tutor_stats_v1'
 const PENDING = 'tutor_pending_v1'
@@ -142,7 +143,9 @@ interface PendingPhrase extends PhraseRecord {
 
 const isPending = (p: any): p is PendingPhrase =>
   p && (p.uid === null || typeof p.uid === 'string') && isLevel(p.level) &&
-  ['id', 'sessionId', 'said', 'reply', 'at'].every((k) => typeof p[k] === 'string')
+  ['id', 'sessionId', 'said', 'reply', 'at'].every((k) => typeof p[k] === 'string') &&
+  (p.translation == null || typeof p.translation === 'string') &&
+  (p.title === undefined || typeof p.title === 'string')
 
 function loadPending(): PendingPhrase[] {
   const data = readJson(PENDING)
@@ -156,6 +159,22 @@ function savePending(list: PendingPhrase[]) {
 }
 
 const pendingFor = (uid: string | null) => loadPending().filter((p) => p.uid === null || p.uid === uid)
+
+/** Frases da fila offline deste usuário que ainda vão para o histórico de conversas. */
+export const pendingChatPhrases = (uid: string | null): PhraseRecord[] => pendingFor(uid).filter((p) => !p.skipChat)
+
+/** Conversa apagada do histórico: as frases da fila dela vão só para as estatísticas. */
+export function detachPendingChat(sessionId: string) {
+  const list = loadPending()
+  if (list.some((p) => p.sessionId === sessionId && !p.skipChat))
+    savePending(list.map((p) => (p.sessionId === sessionId ? { ...p, skipChat: true } : p)))
+}
+
+/** Avisa a cada mudança na fila offline ou nas estatísticas locais. */
+export function onStatsChanged(cb: () => void) {
+  window.addEventListener(CHANGED, cb)
+  return () => window.removeEventListener(CHANGED, cb)
+}
 
 function addPending(p: PendingPhrase) {
   savePending([...loadPending(), p])
@@ -199,19 +218,28 @@ export function usePendingSync(uid: string | null) {
 
 /* ---------------- Gravação ---------------- */
 
-/** Registra uma frase avaliada pela IA. Trocar de nível no meio da conversa abre um novo registro. */
-export async function recordPhrase(
-  uid: string | null,
-  sessionId: string,
-  level: Level,
-  said: string,
-  feedback: Feedback | null,
-  reply: string,
-) {
-  const rec: PhraseRecord = { id: newPhraseId(), sessionId, level, said, feedback, reply, at: new Date().toISOString() }
+export interface NewPhrase {
+  sessionId: string
+  level: Level
+  said: string
+  feedback: Feedback | null
+  reply: string
+  translation: string | null
+  /** só na primeira frase da conversa */
+  title?: string
+}
+
+/**
+ * Registra uma frase avaliada pela IA: estatísticas, correção e histórico da conversa.
+ * Trocar de nível no meio da conversa abre um novo registro de estatística (o histórico continua o mesmo).
+ */
+export async function recordPhrase(uid: string | null, p: NewPhrase) {
+  const rec: PhraseRecord = { ...p, id: newPhraseId(), at: new Date().toISOString() }
+  if (!rec.title) delete rec.title
 
   if (!firebaseReady()) {
     writeJson(STORAGE, applyPhrase(loadStats(), rec))
+    appendLocalTurn(rec)
     return notify()
   }
   // offline ou ainda sem login: guarda na fila e envia depois
