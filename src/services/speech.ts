@@ -43,23 +43,98 @@ const STT_ERRORS: Record<string, string> = {
   network: 'Sem conexão para reconhecer a voz',
 }
 
+const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '')
+
+/**
+ * Remove repetições consecutivas idênticas de palavras (eco/stuttering do
+ * reconhecimento no celular): "hello hello my my name" → "hello my name".
+ */
+export function collapseRepeats(text: string) {
+  const out: string[] = []
+  for (const word of text.split(/\s+/)) {
+    if (!word) continue
+    const prev = out[out.length - 1]
+    if (prev !== undefined && norm(prev) === norm(word) && norm(word) !== '') continue
+    out.push(word)
+  }
+  return out.join(' ')
+}
+
+/**
+ * Junta os resultados da sessão. No Chrome para Android cada resultado costuma
+ * repetir o texto anterior inteiro ("hello" → "hello my" → "hello my name"),
+ * então concatenar tudo duplica as palavras. Aqui, se o novo trecho já contém
+ * o acumulado, ele o substitui; se já está contido no final, é ignorado.
+ */
+function mergeResults(results: ArrayLike<SpeechRecognitionResultLike>) {
+  let acc = ''
+  for (let i = 0; i < results.length; i++) {
+    const t = results[i][0].transcript.trim()
+    if (!t) continue
+    const a = acc.toLowerCase()
+    const b = t.toLowerCase()
+    if (!acc || b.startsWith(a)) acc = t
+    else if (!a.endsWith(b)) acc = `${acc} ${t}`
+  }
+  return collapseRepeats(acc)
+}
+
+// Instância ativa (no máximo uma), para que o TTS possa cortar o microfone.
+let activeRec: SpeechRecognitionLike | null = null
+
+/** Para o reconhecimento imediatamente (usado quando o tutor começa a falar). */
+export function abortListening() {
+  activeRec?.abort()
+}
+
 /**
  * Reconhecimento de voz em inglês. `onTranscript` recebe o texto acumulado
- * da sessão atual (parcial enquanto o usuário fala, final ao terminar).
+ * da sessão atual (parcial enquanto o usuário fala, final ao terminar),
+ * já sem palavras repetidas.
  */
 export function useSpeechRecognition(onTranscript: (text: string) => void) {
   const [listening, setListening] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const recRef = useRef<SpeechRecognitionLike | null>(null)
+  const endTimer = useRef<number | undefined>(undefined)
   const cbRef = useRef(onTranscript)
   cbRef.current = onTranscript
 
-  const stop = useCallback(() => recRef.current?.stop(), [])
+  /** Solta a instância: remove handlers, cancela timers e zera o estado. */
+  const cleanup = useCallback((rec: SpeechRecognitionLike | null) => {
+    window.clearTimeout(endTimer.current)
+    if (rec) {
+      rec.onresult = null
+      rec.onerror = null
+      rec.onend = null
+    }
+    if (recRef.current === rec) recRef.current = null
+    if (activeRec === rec) activeRec = null
+    setListening(false)
+  }, [])
+
+  const stop = useCallback(() => {
+    const rec = recRef.current
+    if (!rec) return
+    rec.stop()
+    // alguns navegadores móveis nem sempre disparam `onend`: força a limpeza
+    window.clearTimeout(endTimer.current)
+    endTimer.current = window.setTimeout(() => {
+      if (recRef.current !== rec) return
+      rec.abort()
+      cleanup(rec)
+    }, 1500)
+  }, [cleanup])
 
   const start = useCallback(() => {
     const Ctor = getRecognitionCtor()
     if (!Ctor || recRef.current) return
-    stopSpeaking() // não transcrever a própria voz do tutor
+    // Toque acidental enquanto o tutor fala: só interrompe a leitura, sem abrir
+    // o microfone — senão ele capta o eco do alto-falante do celular.
+    if (speakingId !== null) {
+      stopSpeaking()
+      return
+    }
     setError(null)
 
     const rec = new Ctor()
@@ -67,30 +142,31 @@ export function useSpeechRecognition(onTranscript: (text: string) => void) {
     rec.continuous = true
     rec.interimResults = true
     rec.onresult = (e) => {
-      let text = ''
-      for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript
-      cbRef.current(text.trim())
+      if (recRef.current !== rec) return
+      cbRef.current(mergeResults(e.results))
     }
     rec.onerror = (e) => {
       if (e.error !== 'aborted' && e.error !== 'no-speech') {
         setError(STT_ERRORS[e.error] ?? 'Não foi possível ouvir. Tente de novo.')
       }
     }
-    rec.onend = () => {
-      recRef.current = null
-      setListening(false)
-    }
+    rec.onend = () => cleanup(rec)
     recRef.current = rec
+    activeRec = rec
     try {
       rec.start()
       setListening(true)
     } catch {
-      recRef.current = null
+      cleanup(rec)
     }
-  }, [])
+  }, [cleanup])
 
-  // encerra a captura se o componente desmontar
-  useEffect(() => () => recRef.current?.abort(), [])
+  // encerra a captura e libera a instância se o componente desmontar
+  useEffect(() => () => {
+    const rec = recRef.current
+    rec?.abort()
+    cleanup(rec)
+  }, [cleanup])
 
   return { supported: sttSupported, listening, error, start, stop }
 }
@@ -134,6 +210,7 @@ export function toSpeakable(text: string) {
 
 export function speak(id: string, text: string) {
   if (!ttsSupported) return
+  abortListening() // nunca ouvir o próprio alto-falante
   const synth = window.speechSynthesis
   synth.cancel()
   const u = new SpeechSynthesisUtterance(toSpeakable(text))
