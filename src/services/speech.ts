@@ -2,6 +2,7 @@
 // - Speech-to-Text via Web Speech API (webkitSpeechRecognition)
 // - Text-to-Speech via window.speechSynthesis
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { appendTranscript } from '../lib/transcript'
 
 const LANG = 'en-US'
 
@@ -16,6 +17,7 @@ interface SpeechRecognitionLike {
   lang: string
   continuous: boolean
   interimResults: boolean
+  maxAlternatives: number
   onresult: ((e: SpeechRecognitionEventLike) => void) | null
   onerror: ((e: SpeechRecognitionErrorEventLike) => void) | null
   onend: (() => void) | null
@@ -65,6 +67,8 @@ export function collapseRepeats(text: string) {
  * repetir o texto anterior inteiro ("hello" → "hello my" → "hello my name"),
  * então concatenar tudo duplica as palavras. Aqui, se o novo trecho já contém
  * o acumulado, ele o substitui; se já está contido no final, é ignorado.
+ * No desktop cada pausa gera um resultado novo, que é costurado ao anterior
+ * por `appendTranscript` (sem a maiúscula falsa de "início de frase").
  */
 function mergeResults(results: ArrayLike<SpeechRecognitionResultLike>) {
   let acc = ''
@@ -73,8 +77,8 @@ function mergeResults(results: ArrayLike<SpeechRecognitionResultLike>) {
     if (!t) continue
     const a = acc.toLowerCase()
     const b = t.toLowerCase()
-    if (!acc || b.startsWith(a)) acc = t
-    else if (!a.endsWith(b)) acc = `${acc} ${t}`
+    if (!acc || b.startsWith(a)) acc = appendTranscript('', t)
+    else if (!a.endsWith(b)) acc = appendTranscript(acc, t)
   }
   return collapseRepeats(acc)
 }
@@ -94,8 +98,11 @@ const IDLE_TIMEOUT_MS = 60_000
 // Sessões que terminam quase na hora seguidas vezes indicam um problema: desiste.
 const QUICK_END_MS = 1000
 const MAX_QUICK_ENDS = 4
-
-const joinText = (a: string, b: string) => (a && b ? `${a} ${b}` : a || b)
+// Intervalo antes de reabrir a sessão: o Safari lança InvalidStateError se o
+// `start()` vier colado no `onend` anterior.
+const REOPEN_DELAY_MS = 120
+// Por quanto tempo depois do último resultado a voz conta como "ouvida".
+const HEARING_MS = 700
 
 /**
  * Reconhecimento de voz em inglês. `onTranscript` recebe o texto acumulado
@@ -105,10 +112,15 @@ const joinText = (a: string, b: string) => (a && b ? `${a} ${b}` : a || b)
  * O navegador encerra a sessão sozinho após alguns segundos de silêncio
  * (no celular, bem rápido). Para o usuário poder pausar e pensar, a sessão é
  * reaberta automaticamente, preservando o texto, até ele tocar no microfone
- * de novo, enviar a mensagem ou ficar 60 s em silêncio.
+ * de novo, enviar a mensagem ou ficar 60 s em silêncio. Pausas nunca enviam
+ * a mensagem nem inventam pontuação: o texto só é costurado.
+ *
+ * `hearing` fica true enquanto chegam resultados (o usuário está falando),
+ * para o indicador visual reagir à voz.
  */
 export function useSpeechRecognition(onTranscript: (text: string) => void) {
   const [listening, setListening] = useState(false)
+  const [hearing, setHearing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const recRef = useRef<SpeechRecognitionLike | null>(null)
   const wantRef = useRef(false) // o usuário quer continuar gravando?
@@ -117,8 +129,17 @@ export function useSpeechRecognition(onTranscript: (text: string) => void) {
   const quickEnds = useRef(0)
   const endTimer = useRef<number | undefined>(undefined)
   const idleTimer = useRef<number | undefined>(undefined)
+  const reopenTimer = useRef<number | undefined>(undefined)
+  const hearingTimer = useRef<number | undefined>(undefined)
   const cbRef = useRef(onTranscript)
   cbRef.current = onTranscript
+
+  const clearTimers = useCallback(() => {
+    window.clearTimeout(endTimer.current)
+    window.clearTimeout(idleTimer.current)
+    window.clearTimeout(reopenTimer.current)
+    window.clearTimeout(hearingTimer.current)
+  }, [])
 
   const detach = useCallback((rec: SpeechRecognitionLike | null) => {
     if (!rec) return
@@ -131,14 +152,14 @@ export function useSpeechRecognition(onTranscript: (text: string) => void) {
   /** Encerra a gravação de vez e zera o estado. */
   const finish = useCallback(() => {
     wantRef.current = false
-    window.clearTimeout(endTimer.current)
-    window.clearTimeout(idleTimer.current)
+    clearTimers()
     const rec = recRef.current
     detach(rec)
     rec?.abort()
     abortActive = null
     setListening(false)
-  }, [detach])
+    setHearing(false)
+  }, [clearTimers, detach])
 
   const armIdle = useCallback(() => {
     window.clearTimeout(idleTimer.current)
@@ -156,14 +177,20 @@ export function useSpeechRecognition(onTranscript: (text: string) => void) {
     const startedAt = Date.now()
     sessionTextRef.current = ''
     rec.lang = LANG
+    // continuous: uma pausa curta não encerra a sessão (no desktop);
+    // interimResults: o texto aparece enquanto a pessoa fala, sem esperar a pausa.
     rec.continuous = true
     rec.interimResults = true
+    rec.maxAlternatives = 1
     rec.onresult = (e) => {
       if (recRef.current !== rec) return
       sessionTextRef.current = mergeResults(e.results)
       quickEnds.current = 0
       armIdle()
-      cbRef.current(collapseRepeats(joinText(committedRef.current, sessionTextRef.current)))
+      setHearing(true)
+      window.clearTimeout(hearingTimer.current)
+      hearingTimer.current = window.setTimeout(() => setHearing(false), HEARING_MS)
+      cbRef.current(collapseRepeats(appendTranscript(committedRef.current, sessionTextRef.current)))
     }
     rec.onerror = (e) => {
       if (FATAL_ERRORS.has(e.error)) {
@@ -175,11 +202,16 @@ export function useSpeechRecognition(onTranscript: (text: string) => void) {
     rec.onend = () => {
       if (recRef.current !== rec) return
       detach(rec)
-      committedRef.current = joinText(committedRef.current, sessionTextRef.current)
+      committedRef.current = appendTranscript(committedRef.current, sessionTextRef.current)
       sessionTextRef.current = ''
       quickEnds.current = Date.now() - startedAt < QUICK_END_MS ? quickEnds.current + 1 : 0
-      if (wantRef.current && quickEnds.current < MAX_QUICK_ENDS) openSession()
-      else finish()
+      if (!wantRef.current || quickEnds.current >= MAX_QUICK_ENDS) return finish()
+      // pausa natural: reabre em seguida, mantendo o indicador "Ouvindo…"
+      window.clearTimeout(reopenTimer.current)
+      reopenTimer.current = window.setTimeout(() => {
+        if (wantRef.current) openSession()
+        else finish()
+      }, REOPEN_DELAY_MS)
     }
     recRef.current = rec
     try {
@@ -220,18 +252,27 @@ export function useSpeechRecognition(onTranscript: (text: string) => void) {
     openSession()
   }, [armIdle, finish, openSession])
 
+  // App em segundo plano (troca de aba, tela bloqueada): o navegador corta o
+  // microfone e as reaberturas falhariam em sequência. Encerra de forma limpa.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden' && wantRef.current) stop()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [stop])
+
   // encerra a captura e libera a instância se o componente desmontar
   useEffect(() => () => {
     if (abortActive === finish) abortActive = null
     wantRef.current = false
-    window.clearTimeout(endTimer.current)
-    window.clearTimeout(idleTimer.current)
+    clearTimers()
     const rec = recRef.current
     detach(rec)
     rec?.abort()
-  }, [detach, finish])
+  }, [clearTimers, detach, finish])
 
-  return { supported: sttSupported, listening, error, start, stop }
+  return { supported: sttSupported, listening, hearing, error, start, stop }
 }
 
 /* ---------------- Text-to-Speech ---------------- */

@@ -17,12 +17,80 @@ export interface VocabProps {
 
 const WORD_RE = /[A-Za-z]+(?:['’][A-Za-z]+)*(?:-[A-Za-z]+)*/g
 
+/** espera após o último `selectionchange` (ex.: arrastando as alças de seleção no celular) */
+const SELECTION_SETTLE_MS = 350
+
 /**
- * Texto em inglês em que cada palavra é tocável. Arrastar para selecionar várias palavras
- * também abre o pop-up com o termo selecionado.
+ * Texto em inglês em que cada palavra é tocável. Selecionar um trecho (arrastar com o mouse,
+ * ou pressionar e arrastar o dedo no celular) abre o pop-up com o texto selecionado.
+ *
+ * A seleção é lida pela Selection API quando o gesto termina (`mouseup`/`touchend`) e, como
+ * fallback, após o `selectionchange` se acalmar — no celular, arrastar as alças de seleção
+ * não dispara eventos de toque na página. Nenhum listener chama `preventDefault`, então a
+ * rolagem nativa não é afetada.
  */
 function SelectableText({ text, source, onSelectTerm, active, savedIds }: VocabProps & { text: string; source: string }) {
   const ref = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    const root = ref.current
+    if (!root || !onSelectTerm) return
+    let pressing = false
+    let timer: number | undefined
+    /** última seleção enviada (evita reabrir o pop-up para a mesma seleção, ex.: depois de rolar) */
+    let last = ''
+
+    const capture = () => {
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed || !sel.rangeCount) {
+        last = ''
+        return
+      }
+      const range = sel.getRangeAt(0)
+      if (!root.contains(range.commonAncestorContainer)) return
+      const raw = sel.toString()
+      const term = cleanTerm(raw)
+      if (!term || !/[A-Za-z]/.test(term)) return
+      // posição do início da seleção dentro do texto (para achar a frase de contexto)
+      const pre = document.createRange()
+      pre.selectNodeContents(root)
+      pre.setEnd(range.startContainer, range.startOffset)
+      const at = pre.toString().length + (raw.length - raw.trimStart().length)
+      const key = `${at}:${term}`
+      if (key === last) return
+      last = key
+      let rect = range.getBoundingClientRect()
+      if (!rect.width && !rect.height) rect = range.getClientRects()[0] ?? rect
+      onSelectTerm({ term, context: sentenceAt(text, Math.min(at, text.length - 1)), rect, source, offset: -1 })
+    }
+
+    const schedule = (ms: number) => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => !pressing && capture(), ms)
+    }
+    const down = () => { pressing = true }
+    // a seleção só se estabiliza logo depois do fim do gesto
+    const up = () => { pressing = false; schedule(10) }
+    const change = () => schedule(SELECTION_SETTLE_MS)
+
+    const opts = { passive: true } as const
+    document.addEventListener('mousedown', down, opts)
+    document.addEventListener('touchstart', down, opts)
+    document.addEventListener('mouseup', up, opts)
+    document.addEventListener('touchend', up, opts)
+    document.addEventListener('touchcancel', up, opts)
+    document.addEventListener('selectionchange', change)
+    return () => {
+      window.clearTimeout(timer)
+      document.removeEventListener('mousedown', down)
+      document.removeEventListener('touchstart', down)
+      document.removeEventListener('mouseup', up)
+      document.removeEventListener('touchend', up)
+      document.removeEventListener('touchcancel', up)
+      document.removeEventListener('selectionchange', change)
+    }
+  }, [text, source, onSelectTerm])
+
   if (!onSelectTerm) return <>{text}</>
 
   const parts: ReactNode[] = []
@@ -50,16 +118,9 @@ function SelectableText({ text, source, onSelectTerm, active, savedIds }: VocabP
   function onClick(e: MouseEvent) {
     const root = ref.current
     if (!root || !onSelectTerm) return
-    // seleção livre (arrastar) dentro deste texto: usa o trecho selecionado
+    // seleção livre: já tratada pelos listeners de seleção acima
     const sel = window.getSelection()
-    if (sel && !sel.isCollapsed && sel.rangeCount && root.contains(sel.getRangeAt(0).commonAncestorContainer)) {
-      const range = sel.getRangeAt(0)
-      const term = cleanTerm(sel.toString())
-      if (!term || !/[A-Za-z]/.test(term)) return
-      const at = text.indexOf(sel.toString().trim())
-      onSelectTerm({ term, context: sentenceAt(text, Math.max(0, at)), rect: range.getBoundingClientRect(), source, offset: -1 })
-      return
-    }
+    if (sel && !sel.isCollapsed && sel.rangeCount && root.contains(sel.getRangeAt(0).commonAncestorContainer)) return
     // toque numa palavra
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-o]')
     if (!el || !root.contains(el)) return
@@ -74,7 +135,7 @@ function SelectableText({ text, source, onSelectTerm, active, savedIds }: VocabP
   }
 
   return (
-    <span ref={ref} lang="en" onClick={onClick}>
+    <span ref={ref} lang="en" onClick={onClick} className="select-text [-webkit-tap-highlight-color:transparent]">
       {parts}
     </span>
   )

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent } from 'react'
+import { appendTranscript } from '../lib/transcript'
 import { useSpeechRecognition } from '../services/speech'
 
 interface Props {
@@ -8,17 +9,18 @@ interface Props {
 
 // Pressionar por mais que isso = modo "segurar para falar"; menos = toque liga/desliga.
 const HOLD_MS = 350
+// Atrasos das barras do indicador, para a onda não subir toda junta.
+const BAR_DELAYS = [0, 180, 90, 270, 45]
 
 export default function ChatInput({ disabled, onSend }: Props) {
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
   const baseText = useRef('') // texto que já estava no input antes de começar a falar
   const press = useRef<{ at: number; startedNow: boolean } | null>(null)
+  const lastPointerUp = useRef(0) // o `click` logo após um toque/clique já foi tratado no pointerdown
 
-  const mic = useSpeechRecognition((spoken) => {
-    const base = baseText.current
-    setText(base && spoken ? `${base} ${spoken}` : base || spoken)
-  })
+  // a fala é costurada ao que já estava digitado (maiúscula só depois de . ! ?)
+  const mic = useSpeechRecognition((spoken) => setText(appendTranscript(baseText.current, spoken)))
 
   const canSend = text.trim().length > 0 && !disabled
 
@@ -51,10 +53,19 @@ export default function ChatInput({ disabled, onSend }: Props) {
     mic.start()
   }
 
+  function toggleMic() {
+    if (mic.listening) mic.stop()
+    else startMic()
+  }
+
+  // Mouse, toque e caneta passam pelo pointerdown: responde na hora (sem o
+  // atraso do `click` no celular) e permite "segurar para falar".
   function onMicDown(e: PointerEvent<HTMLButtonElement>) {
-    if (e.button !== 0) return
+    if (e.button !== 0 || !e.isPrimary) return
     e.preventDefault() // mantém o foco/teclado como estão
-    e.currentTarget.setPointerCapture(e.pointerId)
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId) // o soltar chega mesmo fora do botão
+    } catch { /* ponteiro já liberado */ }
     if (mic.listening) {
       mic.stop()
       press.current = { at: Date.now(), startedNow: false }
@@ -67,6 +78,8 @@ export default function ChatInput({ disabled, onSend }: Props) {
   function onMicUp() {
     const p = press.current
     press.current = null
+    if (!p) return
+    lastPointerUp.current = Date.now()
     // segurou: soltar encerra a gravação; toque rápido: continua gravando até o próximo toque
     if (p?.startedNow && Date.now() - p.at >= HOLD_MS) mic.stop()
   }
@@ -77,14 +90,24 @@ export default function ChatInput({ disabled, onSend }: Props) {
       {mic.listening && (
         <div
           role="status"
+          aria-live="polite"
           className="pointer-events-none absolute inset-x-0 bottom-full mb-2 flex justify-center animate-in"
         >
-          <span className="flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-zinc-600 shadow-sm ring-1 ring-zinc-900/5 backdrop-blur-md">
-            <span className="relative flex h-2 w-2" aria-hidden>
-              <span className="absolute inset-0 rounded-full bg-red-500 animate-ping opacity-60" />
-              <span className="relative h-2 w-2 rounded-full bg-red-500" />
+          <span className="flex items-center gap-2.5 rounded-full bg-white/90 py-1.5 pr-3.5 pl-3 text-xs shadow-sm ring-1 ring-zinc-900/5 backdrop-blur-md">
+            {/* onda de voz: repousa baixinha no silêncio e se move quando há fala */}
+            <span className="flex h-3.5 items-center gap-[3px]" aria-hidden>
+              {BAR_DELAYS.map((delay, i) => (
+                <span
+                  key={i}
+                  className={`h-full w-[3px] origin-center rounded-full bg-red-500 transition-transform duration-300 ease-out ${
+                    mic.hearing ? 'animate-sound-bar' : 'scale-y-[0.3]'
+                  }`}
+                  style={{ animationDelay: `${delay}ms` }}
+                />
+              ))}
             </span>
-            Ouvindo · toque no microfone para encerrar
+            <span className="font-medium text-zinc-700">Ouvindo…</span>
+            <span className="text-zinc-400">toque para encerrar</span>
           </span>
         </div>
       )}
@@ -112,12 +135,13 @@ export default function ChatInput({ disabled, onSend }: Props) {
             onPointerDown={onMicDown}
             onPointerUp={onMicUp}
             onPointerCancel={onMicUp}
-            onClick={(e) => {
-              // apenas teclado (Enter/Espaço): ponteiro já é tratado acima
-              if (e.detail === 0) (mic.listening ? mic.stop() : startMic())
+            onClick={() => {
+              // o click de um toque/clique já foi tratado no pointerdown; sobra
+              // o teclado (Enter/Espaço) e leitores de tela (TalkBack/VoiceOver)
+              if (Date.now() - lastPointerUp.current > 800) toggleMic()
             }}
             onContextMenu={(e) => e.preventDefault()}
-            className={`flex h-11 w-11 shrink-0 touch-none select-none items-center justify-center rounded-full transition-all duration-300 ease-out active:scale-90 ${
+            className={`flex h-11 w-11 shrink-0 touch-none select-none items-center [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] justify-center rounded-full transition-all duration-300 ease-out active:scale-90 ${
               mic.listening
                 ? 'bg-red-500 text-white animate-mic-pulse'
                 : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700'
