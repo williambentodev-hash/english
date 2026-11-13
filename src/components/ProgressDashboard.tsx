@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { errorTagLabel, LEVELS, type ErrorTag, type Level, type WeakSpot } from '../services/groq'
+import { errorTagLabel, LEVELS, type ErrorTag, type Level, type WeakSpot } from '../services/tutor'
 import SegmentedControl from './SegmentedControl'
 import VocabularyList from './VocabularyList'
 import {

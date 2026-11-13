@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
-import { translateTerm, type TermTranslation } from '../services/groq'
+import { translateTerm, type TermTranslation } from '../services/tutor'
 import { getSpeakingId, speak, stopSpeaking, ttsSupported, useIsSpeaking } from '../services/speech'
 import { MAX_TERM_WORDS, countWords, removeTerm, saveTerm, type VocabEntry } from '../services/vocabulary'
 
@@ -19,7 +19,6 @@ export interface TermSelection {
 interface Props {
   selection: TermSelection
   uid: string | null
-  apiKey: string | null
   /** entrada já salva para este termo, se houver */
   saved: VocabEntry | undefined
   onClose: () => void
@@ -32,13 +31,12 @@ const gap = () => (window.matchMedia?.('(pointer: coarse)').matches ? 18 : 8)
 
 type State = { status: 'loading' } | { status: 'ok'; data: TermTranslation } | { status: 'error'; message: string }
 
-export default function WordPopover({ selection, uid, apiKey, saved, onClose }: Props) {
+export default function WordPopover({ selection, uid, saved, onClose }: Props) {
   const { term, context, rect } = selection
   const ref = useRef<HTMLDivElement>(null)
   const speakId = useId()
   const speaking = useIsSpeaking(speakId)
-  const tooLong = countWords(term) > MAX_TERM_WORDS
-  // seleção livre abre primeiro um menu compacto (Traduzir / Salvar); toque numa palavra vai direto à tradução
+  const tooLong = countWords(term) > MAX_TERM_WORDS  // seleção livre abre primeiro um menu compacto (Traduzir / Salvar); toque numa palavra vai direto à tradução
   const [phase, setPhase] = useState<'menu' | 'detail'>(selection.offset === -1 && !tooLong ? 'menu' : 'detail')
   const [autoSave, setAutoSave] = useState(false)
   const [state, setState] = useState<State>({ status: 'loading' })
@@ -50,17 +48,16 @@ export default function WordPopover({ selection, uid, apiKey, saved, onClose }: 
   useEffect(() => {
     if (tooLong || phase === 'menu') return
     if (saved) return setState({ status: 'ok', data: { translation: saved.translation, base: saved.base } })
-    if (!apiKey) return setState({ status: 'error', message: 'Configure a API key para traduzir.' })
     let alive = true
     setState({ status: 'loading' })
-    translateTerm(term, context, apiKey).then(
+    translateTerm(term, context).then(
       (data) => alive && setState({ status: 'ok', data }),
       (e) => alive && setState({ status: 'error', message: e instanceof Error ? e.message : 'Falha ao traduzir.' }),
     )
     return () => { alive = false }
     // `saved` só importa na abertura: salvar não deve refazer a tradução
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [term, context, apiKey, attempt, tooLong, phase])
+  }, [term, context, attempt, tooLong, phase])
 
   // "Salvar no Vocabulário" pelo menu: salva assim que a tradução chegar
   useEffect(() => {
@@ -217,11 +214,9 @@ export default function WordPopover({ selection, uid, apiKey, saved, onClose }: 
         ) : state.status === 'error' ? (
           <p className="text-red-500">
             {state.message}{' '}
-            {apiKey && (
-              <button type="button" onClick={() => setAttempt((n) => n + 1)} className="font-medium text-blue-500 hover:text-blue-600">
-                Tentar de novo
-              </button>
-            )}
+            <button type="button" onClick={() => setAttempt((n) => n + 1)} className="font-medium text-blue-500 hover:text-blue-600">
+              Tentar de novo
+            </button>
           </p>
         ) : (
           <p lang="pt-BR" className="text-zinc-700">{state.data.translation}</p>

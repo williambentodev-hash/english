@@ -1,5 +1,5 @@
 // Histórico de conversas no localStorage — usado só quando o Firebase não está configurado.
-import { isLevel, type Level } from './groq'
+import { isLevel, type Level } from './tutor'
 import { sessionStart, toFeedback, type ChatSummary, type ChatTurn, type PhraseRecord } from './db'
 
 const STORAGE = 'tutor_chats_v1'

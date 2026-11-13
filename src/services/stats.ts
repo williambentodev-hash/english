@@ -5,8 +5,8 @@
 //   que a conexão volta; enquanto isso o dashboard já a mostra mesclada aos dados da nuvem.
 // - Firebase não configurado: tudo fica só no localStorage deste navegador.
 import { useEffect, useMemo, useState } from 'react'
-import type { ErrorTag, Feedback, Level, WeakSpot } from './groq'
-import { isLevel, parseTags } from './groq'
+import type { ErrorTag, Feedback, Level, WeakSpot } from './tutor'
+import { isLevel, parseTags } from './tutor'
 import { firebaseReady } from '../lib/firebase'
 import { clearStatsRemote, feedbackDocId, recordPhraseRemote, subscribeStatsRemote, type PhraseRecord } from './db'
 import { appendLocalTurn } from './chatStore'

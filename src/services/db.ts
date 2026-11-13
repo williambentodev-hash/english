@@ -28,7 +28,7 @@ import {
   type QuerySnapshot,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { isLevel, parseTags, type Feedback, type Level } from './groq'
+import { isLevel, parseTags, type Feedback, type Level } from './tutor'
 import type { CorrectionEntry, SessionStat, Stats } from './stats'
 
 const MAX_SESSIONS = 200

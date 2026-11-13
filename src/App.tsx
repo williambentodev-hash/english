@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import ApiKeyModal from './components/ApiKeyModal'
 import AuthModal from './components/AuthModal'
 import ChatInput from './components/ChatInput'
 import Sidebar, { ComposeIcon, SIDEBAR_EASE, SidebarIcon } from './components/Sidebar'
@@ -7,7 +6,7 @@ import SettingsModal from './components/SettingsModal'
 import MessageBubble, { TypingIndicator } from './components/MessageBubble'
 import ProgressDashboard, { type DashboardTab } from './components/ProgressDashboard'
 import WordPopover, { type TermSelection } from './components/WordPopover'
-import { getApiKey, isLevel, sendMessage, setApiKey, type ChatMessage, type Level } from './services/groq'
+import { isLevel, sendMessage, type ChatMessage, type Level } from './services/tutor'
 import { isBoolean, useMediaQuery, usePersistentState } from './services/prefs'
 import { ttsSupported, useSpeechRate } from './services/speech'
 import { useAuth } from './services/auth'
@@ -40,8 +39,6 @@ const fromTurns = (turns: ChatTurn[]): ChatMessage[] => [
 ]
 
 export default function App() {
-  const [apiKey, setKey] = useState<string | null>(() => getApiKey())
-  const [showKeyModal, setShowKeyModal] = useState(false)
   const [progressTab, setProgressTab] = useState<DashboardTab | null>(null)
   const [showAccount, setShowAccount] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -89,12 +86,6 @@ export default function App() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages, loading, error])
-
-  function saveKey(key: string) {
-    setApiKey(key)
-    setKey(key)
-    setShowKeyModal(false)
-  }
 
   /** Encerra a sessão atual (se teve alguma frase) e mostra `next` com o id `id`. */
   function switchSession(id: string, next: ChatMessage[], end = true) {
@@ -151,7 +142,6 @@ export default function App() {
   }
 
   async function handleSend(text: string) {
-    if (!apiKey) return setShowKeyModal(true)
     const sid = sessionId.current
     const first = !messages.some((m) => m.role === 'user')
     const ctrl = new AbortController()
@@ -167,7 +157,7 @@ export default function App() {
     try {
       // A API exige que a conversa comece com "user": a saudação local é omitida.
       const history = next[0].role === 'assistant' ? next.slice(1) : next
-      const { reply, feedback, translation } = await sendMessage(history, apiKey, level, weakSpots, ctrl.signal)
+      const { reply, feedback, translation } = await sendMessage(history, level, weakSpots, ctrl.signal)
       if (ctrl.signal.aborted) return
       setMessages((m) => [...m, { role: 'assistant', content: reply, feedback, translation, hidden: blind }])
       void recordPhrase(uid, {
@@ -305,7 +295,6 @@ export default function App() {
           key={`${termSel.source}-${termSel.offset}-${termSel.term}`}
           selection={termSel}
           uid={uid}
-          apiKey={apiKey}
           saved={savedVocab.get(termId(termSel.term))}
           onClose={closeTerm}
         />
@@ -319,23 +308,11 @@ export default function App() {
           onLevelChange={setLevel}
           blind={blind}
           onBlindChange={setBlind}
-          onEditApiKey={() => {
-            setShowSettings(false)
-            setShowKeyModal(true)
-          }}
           onClose={() => setShowSettings(false)}
         />
       )}
 
       {showAccount && <AuthModal user={user} onClose={() => setShowAccount(false)} />}
-
-      {(!cloud || authReady) && (!apiKey || showKeyModal) && (
-        <ApiKeyModal
-          initialKey={apiKey ?? ''}
-          onSave={saveKey}
-          onClose={apiKey ? () => setShowKeyModal(false) : undefined}
-        />
-      )}
     </div>
   )
 }

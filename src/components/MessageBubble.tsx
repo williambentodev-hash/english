@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
-import type { ChatMessage, Feedback } from '../services/groq'
+import type { ChatMessage, Feedback } from '../services/tutor'
 import { getSpeakingId, speak, stopSpeaking, ttsSupported, useIsSpeaking } from '../services/speech'
 import { cleanTerm, sentenceAt, termId } from '../services/vocabulary'
 import type { TermSelection } from './WordPopover'

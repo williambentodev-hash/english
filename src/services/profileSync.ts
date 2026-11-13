@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react'
 import type { User } from 'firebase/auth'
 import { loadUserProfile, saveUserProfile, type UserProfile } from './db'
-import type { Level } from './groq'
+import type { Level } from './tutor'
 import { isSpeechRate, setSpeechRate } from './speech'
 
 interface Setters {

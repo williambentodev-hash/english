@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import SegmentedControl from './SegmentedControl'
-import { LEVELS, type Level } from '../services/groq'
+import { LEVELS, type Level } from '../services/tutor'
 import { SPEECH_RATES, setSpeechRate, ttsSupported, useSpeechRate } from '../services/speech'
 
 interface Props {
@@ -8,7 +8,6 @@ interface Props {
   onLevelChange: (level: Level) => void
   blind: boolean
   onBlindChange: (blind: boolean) => void
-  onEditApiKey: () => void
   onClose: () => void
 }
 
@@ -26,7 +25,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 }
 
 /** Painel de ajustes (bottom sheet no celular, cartão centralizado no desktop). */
-export default function SettingsModal({ level, onLevelChange, blind, onBlindChange, onEditApiKey, onClose }: Props) {
+export default function SettingsModal({ level, onLevelChange, blind, onBlindChange, onClose }: Props) {
   const rate = useSpeechRate()
 
   useEffect(() => {
@@ -93,16 +92,6 @@ export default function SettingsModal({ level, onLevelChange, blind, onBlindChan
           </Section>
         )}
 
-        <Section title="Conexão">
-          <button
-            type="button"
-            onClick={onEditApiKey}
-            className="flex min-h-12 w-full items-center justify-between rounded-2xl bg-zinc-100 px-4 text-sm font-medium text-zinc-800 transition-all duration-300 ease-out hover:bg-zinc-200 active:scale-[0.98]"
-          >
-            API key do Groq
-            <span className="text-zinc-400" aria-hidden>›</span>
-          </button>
-        </Section>
       </div>
     </div>
   )
