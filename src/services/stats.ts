@@ -4,9 +4,9 @@
 // - Sem conexão (ou falha na gravação): a frase vai para uma fila no localStorage, enviada assim
 //   que a conexão volta; enquanto isso o dashboard já a mostra mesclada aos dados da nuvem.
 // - Firebase não configurado: tudo fica só no localStorage deste navegador.
-import { useEffect } from 'react'
-import type { Feedback, Level } from './groq'
-import { isLevel } from './groq'
+import { useEffect, useMemo, useState } from 'react'
+import type { ErrorTag, Feedback, Level, WeakSpot } from './groq'
+import { isLevel, parseTags } from './groq'
 import { firebaseReady } from '../lib/firebase'
 import { clearStatsRemote, feedbackDocId, recordPhraseRemote, subscribeStatsRemote, type PhraseRecord } from './db'
 import { appendLocalTurn } from './chatStore'
@@ -37,6 +37,8 @@ export interface CorrectionEntry {
   said: string
   /** explicação do erro, em português */
   correction: string
+  /** categorias do erro (ausente nas correções anteriores a essa classificação) */
+  tags?: ErrorTag[]
   native: string
   score?: number | null
 }
@@ -122,6 +124,7 @@ function applyPhrase(stats: Stats, r: PhraseRecord): Stats {
           level: r.level,
           said: r.said,
           correction: r.feedback.correction,
+          tags: parseTags(r.feedback.tags),
           native: r.feedback.native,
           score: r.feedback.score,
         },
@@ -327,6 +330,36 @@ export function subscribeStats(uid: string | null, onView: (v: StatsView) => voi
 }
 
 export const sessionAverage = (s: SessionStat) => (s.scored ? s.scoreSum / s.scored : null)
+
+/* ---------------- Erros recorrentes ---------------- */
+
+/** a partir de quantas ocorrências um erro conta como recorrente para o tutor */
+const RECURRING_MIN = 3
+/** quantas categorias o tutor recebe por vez */
+const TUTOR_WEAK_SPOTS = 3
+
+/**
+ * Conta as correções por categoria, da mais frequente para a menos. Como só as correções mais
+ * recentes ficam carregadas, erros antigos que o aluno superou saem da contagem sozinhos.
+ */
+export function countErrorTags(corrections: CorrectionEntry[]): WeakSpot[] {
+  const counts = new Map<ErrorTag, number>()
+  for (const c of corrections) for (const tag of parseTags(c.tags)) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+  return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count)
+}
+
+/** Erros recorrentes do aluno, em tempo real, para orientar o tutor. */
+export function useWeakSpots(uid: string | null): WeakSpot[] {
+  const [corrections, setCorrections] = useState<CorrectionEntry[]>([])
+  useEffect(() => subscribeStats(uid, (v) => setCorrections(v.stats.corrections)), [uid])
+  return useMemo(
+    () =>
+      countErrorTags(corrections)
+        .filter((w) => w.tag !== 'other' && w.count >= RECURRING_MIN)
+        .slice(0, TUTOR_WEAK_SPOTS),
+    [corrections],
+  )
+}
 
 export async function resetStats(uid: string | null) {
   if (uid && firebaseReady()) {

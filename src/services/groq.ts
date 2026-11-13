@@ -31,12 +31,60 @@ const LEVEL_GUIDE: Record<Level, string> = {
 - Score strictly: only fully natural, native-like sentences get 9-10.`,
 }
 
-export function buildSystemPrompt(level: Level) {
+/* ---------------- Categorias de erro ---------------- */
+
+// Lista fixa: o tutor classifica cada correção com estes ids, o que permite contar os erros recorrentes.
+export const ERROR_TAGS = [
+  { id: 'verb_tense', label: 'Tempo verbal', guide: 'wrong tense (past, present, future, perfect, continuous)' },
+  { id: 'verb_form', label: 'Conjugação verbal', guide: 'conjugation or agreement: third-person -s, irregular forms, am/is/are, do/does/did, infinitive vs -ing' },
+  { id: 'article', label: 'Artigos (a, an, the)', guide: 'a/an/the missing, unnecessary or wrong' },
+  { id: 'preposition', label: 'Preposições (in, on, at, of…)', guide: 'wrong, missing or unnecessary preposition (in, on, at, of, to, for...)' },
+  { id: 'plural', label: 'Plural e quantidade', guide: 'plural forms, countable vs uncountable, much/many, few/little' },
+  { id: 'pronoun', label: 'Pronomes', guide: 'pronouns and possessives (he/she/it, his/her, me/I), missing subject' },
+  { id: 'word_order', label: 'Ordem das palavras', guide: 'word order, including question and negative structure, adjective position' },
+  { id: 'word_choice', label: 'Escolha de palavras', guide: 'wrong word, false cognate, literal translation from Portuguese, unnatural collocation' },
+  { id: 'spelling', label: 'Ortografia', guide: 'misspelled word' },
+  { id: 'other', label: 'Outros', guide: 'anything that fits none of the above' },
+] as const
+
+export type ErrorTag = (typeof ERROR_TAGS)[number]['id']
+
+const TAG_IDS: readonly string[] = ERROR_TAGS.map((t) => t.id)
+const MAX_TAGS = 3
+
+export const errorTagLabel = (tag: ErrorTag) => ERROR_TAGS.find((t) => t.id === tag)?.label ?? tag
+
+/** Só categorias conhecidas, sem repetição (o modelo ou dados antigos podem trazer qualquer coisa). */
+export function parseTags(v: unknown): ErrorTag[] {
+  if (!Array.isArray(v)) return []
+  const valid = v.filter((t): t is ErrorTag => typeof t === 'string' && TAG_IDS.includes(t))
+  return [...new Set(valid)].slice(0, MAX_TAGS)
+}
+
+/** Categoria de erro e quantas vezes apareceu nas correções recentes. */
+export interface WeakSpot {
+  tag: ErrorTag
+  count: number
+}
+
+function weakSpotsGuide(weakSpots: WeakSpot[]) {
+  if (!weakSpots.length) return ''
+  const guide = (tag: ErrorTag) => ERROR_TAGS.find((t) => t.id === tag)?.guide ?? tag
+  return `
+=== LEARNER'S RECURRING MISTAKES (from their recent conversations, most frequent first) ===
+${weakSpots.map((w) => `- ${w.tag}: ${guide(w.tag)} — ${w.count} recent mistakes`).join('\n')}
+How to use this:
+- In "reply": steer the conversation naturally so the learner has to produce these structures (e.g. ask about past events if verb tenses are a problem). Never mention these mistakes inside "reply".
+- In "correction": ONLY when the learner's last message has a mistake in one of these categories, end the correction with one extra short sentence, in Portuguese, telling them this is a recurring mistake of theirs and giving a practical tip to remember the rule. If the last message has no mistake in these categories, do not mention them at all.
+`
+}
+
+export function buildSystemPrompt(level: Level, weakSpots: WeakSpot[] = []) {
   return `You are a friendly English tutor having a casual, real conversation with a learner whose native language is Brazilian Portuguese.
 
 Learner level: ${level.toUpperCase()}
 ${LEVEL_GUIDE[level]}
-
+${weakSpotsGuide(weakSpots)}
 === STRICT LANGUAGE SEPARATION (NON-NEGOTIABLE — overrides every other instruction) ===
 Each field has ONE fixed language. Never mix them, never switch them, at any level, in any turn, no matter what language the learner uses or how long the conversation has been in English.
 
@@ -51,7 +99,7 @@ Before answering, silently check: Is "reply" fully English? Is every explanatory
 
 Every time you answer you must (1) evaluate the learner's LAST message and (2) continue the conversation.
 Respond ONLY with a JSON object in exactly this shape, no markdown:
-{"feedback":{"score":<integer 1-10>,"correction":<string or null>,"native":<string>},"reply":<string>,"translation":<string>}
+{"feedback":{"score":<integer 1-10>,"correction":<string or null>,"tags":<array of category ids>,"native":<string>},"reply":<string>,"translation":<string>}
 
 "feedback" — about the learner's last message only:
 - "score": how natural and grammatically correct it is. 10 = sounds like a fluent native speaker; 7-9 = correct but slightly unnatural; 4-6 = understandable with clear mistakes; 1-3 = hard to understand.
@@ -59,8 +107,10 @@ Respond ONLY with a JSON object in exactly this shape, no markdown:
   CORRECT example: "\\"I go yesterday\\" → \\"I went yesterday\\": como a ação já terminou, use o passado simples (past simple). O verbo \\"go\\" é irregular, e o passado é \\"went\\"."
   WRONG example (never do this): "\\"I go yesterday\\" → \\"I went yesterday\\": use the past simple for finished actions."
   Use null if there is nothing to correct.
+- "tags": the category of each mistake explained in "correction" (1 to ${MAX_TAGS} ids, most important first). Use [] when "correction" is null. Use ONLY these exact ids:
+${ERROR_TAGS.map((t) => `  - "${t.id}": ${t.guide}`).join('\n')}
 - "native": in English — how a native speaker would naturally say the same thing, keeping the learner's meaning. If it was already perfect, repeat it.
-- If the learner wrote in Portuguese instead of English, use {"score":null,"correction":null,"native":"<natural English version>"}.
+- If the learner wrote in Portuguese instead of English, use {"score":null,"correction":null,"tags":[],"native":"<natural English version>"}.
 
 "reply" — your conversational message:
 - Plain text, 2-3 short sentences, like a natural chat message. No markdown, lists, headings or corrections (corrections only go in "feedback").
@@ -78,6 +128,8 @@ export interface Feedback {
   /** 1-10, ou null quando o aluno escreveu em português */
   score: number | null
   correction: string | null
+  /** categorias dos erros corrigidos (ausente em feedbacks antigos) */
+  tags?: ErrorTag[]
   native: string
 }
 
@@ -144,10 +196,12 @@ export function parseTutorReply(raw: string): TutorReply {
     const f = data?.feedback
     const native = str(f?.native)
     const n = Number(f?.score)
+    const correction = str(f?.correction)
     const feedback: Feedback | null = native
       ? {
           score: f?.score == null || !Number.isFinite(n) ? null : Math.min(10, Math.max(1, Math.round(n))),
-          correction: str(f?.correction),
+          correction,
+          tags: correction ? parseTags(f?.tags) : [],
           native,
         }
       : null
@@ -169,6 +223,8 @@ export async function sendMessage(
   history: ChatMessage[],
   apiKey: string,
   level: Level,
+  /** erros recorrentes do aluno: o tutor puxa a prática para eles e avisa quando se repetem */
+  weakSpots: WeakSpot[] = [],
   signal?: AbortSignal,
 ): Promise<TutorReply> {
   const res = await fetch(API_URL, {
@@ -180,7 +236,7 @@ export async function sendMessage(
     },
     body: JSON.stringify({
       model: MODEL,
-      messages: [{ role: 'system', content: buildSystemPrompt(level) }, ...history.map(toApiMessage)],
+      messages: [{ role: 'system', content: buildSystemPrompt(level, weakSpots) }, ...history.map(toApiMessage)],
       response_format: { type: 'json_object' },
       max_completion_tokens: 1024,
       // gpt-oss é um modelo de raciocínio: esforço baixo = respostas rápidas para chat

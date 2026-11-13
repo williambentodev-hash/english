@@ -1,8 +1,16 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { LEVELS, type Level } from '../services/groq'
+import { errorTagLabel, LEVELS, type ErrorTag, type Level, type WeakSpot } from '../services/groq'
 import SegmentedControl from './SegmentedControl'
 import VocabularyList from './VocabularyList'
-import { resetStats, sessionAverage, subscribeStats, type SessionStat, type Stats, type StatsView } from '../services/stats'
+import {
+  countErrorTags,
+  resetStats,
+  sessionAverage,
+  subscribeStats,
+  type SessionStat,
+  type Stats,
+  type StatsView,
+} from '../services/stats'
 
 const CHART_SESSIONS = 12
 const CORRECTIONS_PAGE = 15
@@ -177,6 +185,50 @@ function ScoreChart({ points }: { points: Point[] }) {
   )
 }
 
+/* ---------------- Erros mais frequentes ---------------- */
+
+/** Categorias de erro por frequência; tocar em uma filtra a lista de correções abaixo. */
+function FrequentErrors({
+  spots,
+  active,
+  onSelect,
+}: {
+  spots: WeakSpot[]
+  active: ErrorTag | null
+  onSelect: (tag: ErrorTag | null) => void
+}) {
+  const max = spots[0]?.count ?? 1
+  return (
+    <ul className="mt-2 space-y-1">
+      {spots.map(({ tag, count }) => {
+        const on = active === tag
+        return (
+          <li key={tag}>
+            <button
+              onClick={() => onSelect(on ? null : tag)}
+              aria-pressed={on}
+              title={on ? 'Mostrar todas as correções' : 'Ver as correções desta categoria'}
+              className={`block min-h-11 w-full rounded-2xl px-2.5 py-2 text-left transition-all duration-300 ease-out active:scale-[0.99] ${
+                on ? 'bg-blue-50' : 'hover:bg-zinc-50'
+              }`}
+            >
+              <span className="flex items-baseline justify-between gap-3 text-[13.5px]">
+                <span className={on ? 'font-medium text-blue-600' : 'text-zinc-700'}>{errorTagLabel(tag)}</span>
+                <span className="text-xs text-zinc-400 tabular-nums">
+                  {count} {count === 1 ? 'vez' : 'vezes'}
+                </span>
+              </span>
+              <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-zinc-100" aria-hidden>
+                <span className="block h-full rounded-full bg-blue-500" style={{ width: `${(count / max) * 100}%` }} />
+              </span>
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 /* ---------------- Status da sincronização ---------------- */
 
 function SyncStatus({ view, cloudUser }: { view: StatsView; cloudUser: boolean }) {
@@ -221,6 +273,7 @@ export default function ProgressDashboard({ uid, initialTab = 'progress', onClos
   const [view, setView] = useState<StatsView | null>(null)
   const [busy, setBusy] = useState(false)
   const [showAll, setShowAll] = useState(false)
+  const [tagFilter, setTagFilter] = useState<ErrorTag | null>(null)
 
   // tempo real: Firestore + fila offline + localStorage
   useEffect(() => {
@@ -254,6 +307,14 @@ export default function ProgressDashboard({ uid, initialTab = 'progress', onClos
   }, [data])
 
   const conversations = new Set(data.sessions.map((s) => s.id)).size
+
+  // erros por categoria; o filtro some sozinho se a categoria deixar de existir (ex.: histórico apagado)
+  const spots = useMemo(() => countErrorTags(data.corrections), [data])
+  const activeTag = tagFilter && spots.some((s) => s.tag === tagFilter) ? tagFilter : null
+  const corrections = useMemo(
+    () => (activeTag ? data.corrections.filter((c) => c.tags?.includes(activeTag)) : data.corrections),
+    [data, activeTag],
+  )
 
   // tendência: média das últimas 3 conversas vs. as 3 anteriores
   const trend = useMemo(() => {
@@ -356,12 +417,39 @@ export default function ProgressDashboard({ uid, initialTab = 'progress', onClos
               </Card>
             )}
 
-            <Card title={`Erros e correções${data.corrections.length ? ` · ${data.corrections.length}` : ''}`}>
-              {data.corrections.length === 0 ? (
+            {data.corrections.length > 0 && (
+              <Card title="Erros mais frequentes">
+                {spots.length === 0 ? (
+                  <p className="py-2 text-sm text-zinc-400">
+                    As categorias aparecem a partir das suas próximas correções.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-xs text-zinc-400">
+                      Nas suas correções recentes · toque para ver os exemplos
+                    </p>
+                    <FrequentErrors spots={spots} active={activeTag} onSelect={setTagFilter} />
+                  </>
+                )}
+              </Card>
+            )}
+
+            <Card title={`Erros e correções${corrections.length ? ` · ${corrections.length}` : ''}`}>
+              {activeTag && (
+                <button
+                  onClick={() => setTagFilter(null)}
+                  className="mt-1 inline-flex min-h-8 items-center gap-1.5 rounded-full bg-blue-50 px-3 text-xs font-medium text-blue-600 transition-all duration-300 ease-out hover:bg-blue-100 active:scale-95"
+                >
+                  {errorTagLabel(activeTag)}
+                  <span aria-hidden>✕</span>
+                  <span className="sr-only">Remover filtro</span>
+                </button>
+              )}
+              {corrections.length === 0 ? (
                 <p className="py-2 text-sm text-zinc-400">Nenhuma correção ainda. Continue assim! 🎉</p>
               ) : (
                 <ul className="-mx-1 mt-1 divide-y divide-zinc-900/5">
-                  {(showAll ? data.corrections : data.corrections.slice(0, CORRECTIONS_PAGE)).map((c, i) => (
+                  {(showAll ? corrections : corrections.slice(0, CORRECTIONS_PAGE)).map((c, i) => (
                     <li key={c.date + i} className="space-y-1.5 px-1 py-3">
                       <div className="flex items-center gap-2 text-[11px] text-zinc-400">
                         <span>{fmtDate(c.date)}</span>
@@ -376,16 +464,25 @@ export default function ProgressDashboard({ uid, initialTab = 'progress', onClos
                       <p className="text-[13.5px] text-zinc-400 line-through decoration-zinc-300">{c.said}</p>
                       <p className="text-[13.5px] leading-snug text-zinc-700">{c.correction}</p>
                       <p className="text-[13.5px] font-medium leading-snug text-blue-600">{c.native}</p>
+                      {!!c.tags?.length && (
+                        <p className="flex flex-wrap gap-1.5 pt-0.5">
+                          {c.tags.map((t) => (
+                            <span key={t} className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-500">
+                              {errorTagLabel(t)}
+                            </span>
+                          ))}
+                        </p>
+                      )}
                     </li>
                   ))}
                 </ul>
               )}
-              {data.corrections.length > CORRECTIONS_PAGE && (
+              {corrections.length > CORRECTIONS_PAGE && (
                 <button
                   onClick={() => setShowAll((v) => !v)}
                   className="mt-1 block min-h-11 w-full rounded-2xl text-sm font-medium text-blue-500 transition-all duration-300 ease-out hover:bg-zinc-50 active:scale-[0.98]"
                 >
-                  {showAll ? 'Mostrar menos' : `Ver todas (${data.corrections.length})`}
+                  {showAll ? 'Mostrar menos' : `Ver todas (${corrections.length})`}
                 </button>
               )}
             </Card>

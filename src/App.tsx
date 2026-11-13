@@ -12,7 +12,7 @@ import { isBoolean, useMediaQuery, usePersistentState } from './services/prefs'
 import { ttsSupported, useSpeechRate } from './services/speech'
 import { useAuth } from './services/auth'
 import { useProfileSync } from './services/profileSync'
-import { newSessionId, recordPhrase, usePendingSync } from './services/stats'
+import { newSessionId, recordPhrase, usePendingSync, useWeakSpots } from './services/stats'
 import { chatTitle, deleteChat, endChat, loadChat, useChatHistory, type ChatTurn } from './services/history'
 import { termId, useVocabulary } from './services/vocabulary'
 
@@ -62,6 +62,8 @@ export default function App() {
   // login anônimo automático na inicialização; se falhar (offline), uid fica null e o app segue local
   const uid = user?.uid ?? null
   usePendingSync(uid)
+  // erros recorrentes das correções recentes: entram no prompt do tutor a cada frase
+  const weakSpots = useWeakSpots(uid)
   const sessionId = useRef(newSessionId())
   const [currentChat, setCurrentChat] = useState(sessionId.current)
   // pedido em andamento ao tutor: cancelado ao trocar de conversa
@@ -165,7 +167,7 @@ export default function App() {
     try {
       // A API exige que a conversa comece com "user": a saudação local é omitida.
       const history = next[0].role === 'assistant' ? next.slice(1) : next
-      const { reply, feedback, translation } = await sendMessage(history, apiKey, level, ctrl.signal)
+      const { reply, feedback, translation } = await sendMessage(history, apiKey, level, weakSpots, ctrl.signal)
       if (ctrl.signal.aborted) return
       setMessages((m) => [...m, { role: 'assistant', content: reply, feedback, translation, hidden: blind }])
       void recordPhrase(uid, {

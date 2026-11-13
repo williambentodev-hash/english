@@ -28,7 +28,7 @@ import {
   type QuerySnapshot,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { isLevel, type Feedback, type Level } from './groq'
+import { isLevel, parseTags, type Feedback, type Level } from './groq'
 import type { CorrectionEntry, SessionStat, Stats } from './stats'
 
 const MAX_SESSIONS = 200
@@ -134,6 +134,7 @@ export async function recordPhraseRemote(uid: string, r: PhraseRecord) {
     said: r.said,
     score,
     correction: r.feedback?.correction ?? null,
+    tags: parseTags(r.feedback?.tags),
     native: r.feedback?.native ?? '',
     createdAt: serverTimestamp(),
   })
@@ -183,6 +184,7 @@ const toCorrection = (d: QueryDocumentSnapshot): CorrectionEntry | null => {
     level: x.level,
     said: x.said,
     correction: x.correction,
+    tags: parseTags(x.tags),
     native: String(x.native ?? ''),
     score: typeof x.score === 'number' ? x.score : null,
   }
@@ -384,6 +386,7 @@ export function toFeedback(f: any): Feedback | null {
   return {
     score: typeof f.score === 'number' ? f.score : null,
     correction: typeof f.correction === 'string' ? f.correction : null,
+    tags: parseTags(f.tags),
     native: f.native,
   }
 }
