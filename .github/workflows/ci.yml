@@ -20,6 +20,25 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    # banco real para os testes de integração da memória de erros
+    services:
+      db:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: tutor
+          POSTGRES_PASSWORD: tutor
+          POSTGRES_DB: tutor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U tutor -d tutor"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://tutor:tutor@localhost:5432/tutor
+      # também testa o modelo de embeddings de verdade (baixado na primeira vez)
+      RUN_MODEL_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,7 +48,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements*.txt
       - run: pip install -r requirements-dev.txt
-      # os testes não chamam o Groq nem o Firebase: não precisam de segredos
+      # os testes não chamam o Groq nem o Firebase: não precisam de segredos do projeto
       - run: pytest
 
   frontend:

@@ -9,6 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from .auth import AuthUnavailable, FirebaseTokenVerifier, InvalidToken, User
 from .config import Settings, get_settings
 from .llm import GroqClient
+from .memory import MistakeMemory
 from .rate_limit import Rule, SlidingWindowLimiter
 
 log = logging.getLogger(__name__)
@@ -29,6 +30,11 @@ def get_limiter() -> SlidingWindowLimiter:
 
 def get_llm(request: Request) -> GroqClient:
     return request.app.state.llm
+
+
+def get_memory(request: Request) -> MistakeMemory | None:
+    """Memória de erros do aluno; None quando o banco não está configurado ou não conectou."""
+    return getattr(request.app.state, "memory", None)
 
 
 # `def` síncrono de propósito: baixar as chaves públicas do Google bloqueia, então o FastAPI

@@ -21,6 +21,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-tutor}:${POSTGRES_PASSWORD:-tutor}@db:5432/${POSTGRES_DB:-tutor}
     ports:
       - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
 
   db:
     # PostgreSQL com a extensão pgvector (busca por similaridade para o RAG)
@@ -36,7 +39,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      # via TCP: durante a criação do banco o Postgres só atende no socket local e ainda não está pronto
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 10

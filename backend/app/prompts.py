@@ -2,6 +2,7 @@
 import json
 from string import Template
 
+from .memory import PastMistake
 from .schemas import Level, Message, WeakSpot
 from .tags import ERROR_TAGS, MAX_TAGS
 
@@ -20,7 +21,7 @@ _SYSTEM = Template("""You are a friendly English tutor having a casual, real con
 
 Learner level: ${level}
 ${level_guide}
-${weak_spots}
+${weak_spots}${similar}
 === STRICT LANGUAGE SEPARATION (NON-NEGOTIABLE — overrides every other instruction) ===
 Each field has ONE fixed language. Never mix them, never switch them, at any level, in any turn, no matter what language the learner uses or how long the conversation has been in English.
 
@@ -73,11 +74,37 @@ How to use this:
 """
 
 
-def build_system_prompt(level: Level, weak_spots: list[WeakSpot] | None = None) -> str:
+def _quote(text: str, limit: int) -> str:
+    """Texto vindo do histórico do aluno: uma linha só e com tamanho limitado dentro do prompt."""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def _similar_guide(similar: list[PastMistake]) -> str:
+    if not similar:
+        return ""
+    lines = "\n".join(
+        f'- They wrote "{_quote(m.said, 300)}" (correct: "{_quote(m.native, 300)}")'
+        f'{f", {m.times} times" if m.times > 1 else ""}. Explanation given then: {_quote(m.correction, 400)}'
+        for m in similar
+    )
+    return f"""
+=== SIMILAR MISTAKES FROM THIS LEARNER'S HISTORY (retrieved because they resemble the last message) ===
+{lines}
+How to use this:
+- Compare the learner's last message with these. ONLY if it repeats the same mistake as one of them, say so inside "correction", in Portuguese: remind them they already made this mistake, quote their earlier sentence, and reinforce the rule.
+- If the last message does not repeat any of these mistakes, ignore this section completely. Never mention it inside "reply".
+"""
+
+
+def build_system_prompt(
+    level: Level, weak_spots: list[WeakSpot] | None = None, similar: list[PastMistake] | None = None
+) -> str:
     return _SYSTEM.substitute(
         level=level.upper(),
         level_guide=LEVEL_GUIDE[level],
         weak_spots=_weak_spots_guide(weak_spots or []),
+        similar=_similar_guide(similar or []),
         max_tags=MAX_TAGS,
         tag_list="\n".join(f'  - "{tag}": {guide}' for tag, guide in ERROR_TAGS.items()),
     )
@@ -96,14 +123,18 @@ def to_api_message(message: Message) -> dict[str, str]:
 
 
 def build_chat_messages(
-    level: Level, history: list[Message], weak_spots: list[WeakSpot], max_history: int
+    level: Level,
+    history: list[Message],
+    weak_spots: list[WeakSpot],
+    max_history: int,
+    similar: list[PastMistake] | None = None,
 ) -> list[dict[str, str]]:
     """Prompt de sistema + as últimas mensagens da conversa, começando por uma do aluno."""
     recent = history[-max_history:] if max_history > 0 else history
     while recent and recent[0].role != "user":
         recent = recent[1:]
     return [
-        {"role": "system", "content": build_system_prompt(level, weak_spots)},
+        {"role": "system", "content": build_system_prompt(level, weak_spots, similar)},
         *(to_api_message(m) for m in recent),
     ]
 

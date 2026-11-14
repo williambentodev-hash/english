@@ -6,7 +6,7 @@
 // - Firebase não configurado: tudo fica só no localStorage deste navegador.
 import { useEffect, useMemo, useState } from 'react'
 import type { ErrorTag, Feedback, Level, WeakSpot } from './tutor'
-import { isLevel, parseTags } from './tutor'
+import { forgetMistakes, isLevel, parseTags } from './tutor'
 import { firebaseReady } from '../lib/firebase'
 import { clearStatsRemote, feedbackDocId, recordPhraseRemote, subscribeStatsRemote, type PhraseRecord } from './db'
 import { appendLocalTurn } from './chatStore'
@@ -363,7 +363,8 @@ export function useWeakSpots(uid: string | null): WeakSpot[] {
 
 export async function resetStats(uid: string | null) {
   if (uid && firebaseReady()) {
-    await clearStatsRemote(uid)
+    // o servidor também guarda os erros do aluno (memória do tutor): zerar apaga os dois
+    await Promise.all([clearStatsRemote(uid), forgetMistakes()])
     removeKey(CACHE(uid))
   }
   savePending(loadPending().filter((p) => p.uid !== null && p.uid !== uid))

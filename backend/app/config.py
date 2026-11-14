@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     # Só as últimas N mensagens da conversa vão para o modelo (custo previsível)
     max_history_messages: int = 30
 
+    # Memória de erros (RAG): PostgreSQL com pgvector. Vazio = tutor funciona sem memória.
+    database_url: str = ""
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    # quantos erros antigos entram no prompt e quão parecidos precisam ser (distância de cosseno)
+    memory_top_k: int = 3
+    memory_max_distance: float = 0.6
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]

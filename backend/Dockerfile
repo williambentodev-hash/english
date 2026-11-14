@@ -11,6 +11,14 @@ WORKDIR /srv
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
+# O modelo de embeddings vai dentro da imagem: o contêiner não baixa nada ao iniciar.
+ENV FASTEMBED_CACHE_PATH=/srv/models \
+    HF_HUB_DISABLE_TELEMETRY=1
+ARG EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('${EMBEDDING_MODEL}')" \
+    # o servidor roda sem root: precisa conseguir ler os arquivos do modelo
+    && chmod -R a+rX /srv/models
+
 COPY app ./app
 
 # sem root dentro do contêiner

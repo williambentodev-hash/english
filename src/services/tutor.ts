@@ -101,8 +101,8 @@ export class AIError extends Error {
 
 /* ---------------- Back-end ---------------- */
 
-/** POST autenticado no back-end com o ID token do Firebase do usuário atual. */
-async function callBackend<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+/** Chamada autenticada ao back-end com o ID token do Firebase do usuário atual (POST, ou DELETE sem corpo). */
+async function callBackend<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   if (!BACKEND_URL) throw new AIError('Servidor não configurado: defina VITE_API_URL.')
   // espera o login automático (convidado) terminar; se falhou, mostra o motivo
   const user = await waitForUser().catch((e) => {
@@ -111,10 +111,10 @@ async function callBackend<T>(path: string, body: unknown, signal?: AbortSignal)
   // o SDK renova o token sozinho quando está perto de expirar
   const token = await user.getIdToken()
   const res = await fetch(`${BACKEND_URL}${path}`, {
-    method: 'POST',
+    method: body === undefined ? 'DELETE' : 'POST',
     signal,
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!res.ok) {
     let msg = `Erro ${res.status}`
@@ -153,6 +153,14 @@ export function sendMessage(
     },
     signal,
   )
+}
+
+/**
+ * Apaga a memória de erros que o servidor guarda sobre o usuário (os erros antigos que o tutor
+ * usa para avisar quando um se repete). Chamada quando o usuário zera o progresso.
+ */
+export function forgetMistakes(): Promise<{ deleted: number }> {
+  return callBackend<{ deleted: number }>('/api/memory')
 }
 
 /* ---------------- Tradução rápida de termo (Vocabulário) ---------------- */
