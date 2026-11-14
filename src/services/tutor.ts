@@ -155,6 +155,48 @@ export function sendMessage(
   )
 }
 
+/* ---------------- Exercícios personalizados ---------------- */
+
+export interface Exercise {
+  /** choice: completar a lacuna (___) escolhendo uma opção; rewrite: reescrever a frase errada */
+  type: 'choice' | 'rewrite'
+  tag: ErrorTag
+  /** enunciado, em português */
+  instruction: string
+  /** frase em inglês: com "___" (choice) ou com um erro (rewrite) */
+  prompt: string
+  /** alternativas (só em choice) */
+  options: string[]
+  answer: string
+  /** por que a resposta é essa, em português */
+  explanation: string
+}
+
+/** Pede ao agente do back-end exercícios sobre os pontos fracos do aluno (leva alguns segundos). */
+export async function generateExercises(level: Level, weakSpots: WeakSpot[], count = 5): Promise<Exercise[]> {
+  const { exercises } = await callBackend<{ exercises: Exercise[] }>('/api/exercises', {
+    level,
+    weak_spots: weakSpots,
+    count,
+  })
+  return exercises
+}
+
+export interface CheckResult {
+  correct: boolean
+  /** comentário curto em português, quando o modelo avaliou a resposta */
+  feedback: string | null
+}
+
+/** Corrige a resposta escrita de um exercício de reescrever (aceita variações corretas). */
+export function checkExercise(exercise: Exercise, answer: string): Promise<CheckResult> {
+  return callBackend<CheckResult>('/api/exercises/check', {
+    prompt: exercise.prompt,
+    expected: exercise.answer,
+    answer,
+  })
+}
+
 /**
  * Apaga a memória de erros que o servidor guarda sobre o usuário (os erros antigos que o tutor
  * usa para avisar quando um se repete). Chamada quando o usuário zera o progresso.

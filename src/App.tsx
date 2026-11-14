@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import AuthModal from './components/AuthModal'
 import ChatInput from './components/ChatInput'
+import ExercisesPanel from './components/ExercisesPanel'
 import Sidebar, { ComposeIcon, SIDEBAR_EASE, SidebarIcon } from './components/Sidebar'
 import SettingsModal from './components/SettingsModal'
 import MessageBubble, { TypingIndicator } from './components/MessageBubble'
@@ -41,6 +42,7 @@ const fromTurns = (turns: ChatTurn[]): ChatMessage[] => [
 export default function App() {
   const [progressTab, setProgressTab] = useState<DashboardTab | null>(null)
   const [showAccount, setShowAccount] = useState(false)
+  const [showExercises, setShowExercises] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   // sidebar: coluna recolhível no desktop (lembrada) e gaveta no celular (sempre começa fechada)
   const desktop = useMediaQuery('(min-width: 1024px)')
@@ -201,6 +203,10 @@ export default function App() {
         onDeleteChat={removeChat}
         onNew={newConversation}
         onOpenProgress={openProgress}
+        onOpenExercises={() => {
+          closeDrawer()
+          setShowExercises(true)
+        }}
         cloud={cloud}
         authReady={authReady}
         user={user}
@@ -301,6 +307,8 @@ export default function App() {
       )}
 
       {progressTab && <ProgressDashboard uid={uid} initialTab={progressTab} onClose={() => setProgressTab(null)} />}
+
+      {showExercises && <ExercisesPanel level={level} weakSpots={weakSpots} onClose={() => setShowExercises(false)} />}
 
       {showSettings && (
         <SettingsModal

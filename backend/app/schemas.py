@@ -2,9 +2,9 @@
 import math
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .tags import parse_tags
+from .tags import ERROR_TAGS, parse_tags
 
 Level = Literal["beginner", "intermediate", "advanced"]
 ErrorTag = Literal[
@@ -91,3 +91,87 @@ class TermTranslation(BaseModel):
     translation: str
     # forma de dicionário em inglês (ex.: "went" → "go"), quando diferente do termo
     base: str | None
+
+
+# ---------------- exercícios ----------------
+
+
+class Exercise(BaseModel):
+    """Um exercício gerado pelo agente. Validado com rigor: vem do modelo."""
+
+    # choice: completar a lacuna (___) escolhendo uma opção; rewrite: reescrever a frase errada
+    type: Literal["choice", "rewrite"]
+    tag: str
+    # enunciado, em português
+    instruction: str = Field(min_length=1, max_length=300)
+    # frase em inglês: com "___" (choice) ou com um erro (rewrite)
+    prompt: str = Field(min_length=1, max_length=500)
+    options: list[str] = Field(default_factory=list, max_length=5)
+    answer: str = Field(min_length=1, max_length=500)
+    # por que a resposta é essa, em português
+    explanation: str = Field(min_length=1, max_length=800)
+
+    @field_validator("instruction", "prompt", "answer", "explanation", mode="before")
+    @classmethod
+    def _strip(cls, v: Any) -> Any:
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("tag", mode="before")
+    @classmethod
+    def _tag(cls, v: Any) -> str:
+        return v if isinstance(v, str) and v in ERROR_TAGS else "other"
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def _options(cls, v: Any) -> Any:
+        if not isinstance(v, list):
+            return []
+        seen: list[str] = []
+        for option in v:
+            if isinstance(option, str) and option.strip() and option.strip() not in seen:
+                seen.append(option.strip())
+        return seen
+
+    @model_validator(mode="after")
+    def _coherent(self) -> "Exercise":
+        if self.type == "choice":
+            if "___" not in self.prompt:
+                raise ValueError('choice: "prompt" precisa ter a lacuna ___')
+            if len(self.options) < 2:
+                raise ValueError("choice: pelo menos 2 opções diferentes")
+            if self.answer not in self.options:
+                raise ValueError('choice: "answer" precisa ser uma das opções')
+        else:
+            self.options = []
+            if normalize_answer(self.answer) == normalize_answer(self.prompt):
+                raise ValueError('rewrite: "answer" está igual à frase errada')
+        return self
+
+
+def normalize_answer(text: str) -> str:
+    """Compara respostas ignorando maiúsculas, pontuação final e espaços a mais."""
+    return " ".join(text.lower().replace("’", "'").split()).rstrip(".!?")
+
+
+class ExercisesRequest(BaseModel):
+    level: Level
+    weak_spots: list[WeakSpot] = Field(default_factory=list, max_length=10)
+    count: int = Field(default=5, ge=1, le=8)
+
+
+class ExercisesResponse(BaseModel):
+    exercises: list[Exercise]
+
+
+class CheckRequest(BaseModel):
+    """Resposta escrita pelo aluno em um exercício de reescrever."""
+
+    prompt: str = Field(min_length=1, max_length=500)
+    expected: str = Field(min_length=1, max_length=500)
+    answer: str = Field(min_length=1, max_length=500)
+
+
+class CheckResult(BaseModel):
+    correct: bool
+    # comentário curto em português (ausente quando a resposta bate com a esperada)
+    feedback: str | None = None
