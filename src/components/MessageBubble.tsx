@@ -1,6 +1,145 @@
-import { useEffect, useId, useState, type ReactNode } from 'react'
-import type { ChatMessage, Feedback } from '../services/groq'
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import type { ChatMessage, Feedback } from '../services/tutor'
 import { getSpeakingId, speak, stopSpeaking, ttsSupported, useIsSpeaking } from '../services/speech'
+import { cleanTerm, sentenceAt, termId } from '../services/vocabulary'
+import type { TermSelection } from './WordPopover'
+
+/* ---------------- Texto com palavras tocáveis ---------------- */
+
+/** Liga as mensagens do tutor ao pop-up de vocabulário. */
+export interface VocabProps {
+  onSelectTerm?: (sel: TermSelection) => void
+  /** termo com o pop-up aberto (para destacá-lo) */
+  active?: { source: string; offset: number } | null
+  /** ids dos termos já salvos (sublinhados) */
+  savedIds?: Set<string>
+}
+
+const WORD_RE = /[A-Za-z]+(?:['’][A-Za-z]+)*(?:-[A-Za-z]+)*/g
+
+/** espera após o último `selectionchange` (ex.: arrastando as alças de seleção no celular) */
+const SELECTION_SETTLE_MS = 350
+
+/**
+ * Texto em inglês em que cada palavra é tocável. Selecionar um trecho (arrastar com o mouse,
+ * ou pressionar e arrastar o dedo no celular) abre o pop-up com o texto selecionado.
+ *
+ * A seleção é lida pela Selection API quando o gesto termina (`mouseup`/`touchend`) e, como
+ * fallback, após o `selectionchange` se acalmar — no celular, arrastar as alças de seleção
+ * não dispara eventos de toque na página. Nenhum listener chama `preventDefault`, então a
+ * rolagem nativa não é afetada.
+ */
+function SelectableText({ text, source, onSelectTerm, active, savedIds }: VocabProps & { text: string; source: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    const root = ref.current
+    if (!root || !onSelectTerm) return
+    let pressing = false
+    let timer: number | undefined
+    /** última seleção enviada (evita reabrir o pop-up para a mesma seleção, ex.: depois de rolar) */
+    let last = ''
+
+    const capture = () => {
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed || !sel.rangeCount) {
+        last = ''
+        return
+      }
+      const range = sel.getRangeAt(0)
+      if (!root.contains(range.commonAncestorContainer)) return
+      const raw = sel.toString()
+      const term = cleanTerm(raw)
+      if (!term || !/[A-Za-z]/.test(term)) return
+      // posição do início da seleção dentro do texto (para achar a frase de contexto)
+      const pre = document.createRange()
+      pre.selectNodeContents(root)
+      pre.setEnd(range.startContainer, range.startOffset)
+      const at = pre.toString().length + (raw.length - raw.trimStart().length)
+      const key = `${at}:${term}`
+      if (key === last) return
+      last = key
+      let rect = range.getBoundingClientRect()
+      if (!rect.width && !rect.height) rect = range.getClientRects()[0] ?? rect
+      onSelectTerm({ term, context: sentenceAt(text, Math.min(at, text.length - 1)), rect, source, offset: -1 })
+    }
+
+    const schedule = (ms: number) => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => !pressing && capture(), ms)
+    }
+    const down = () => { pressing = true }
+    // a seleção só se estabiliza logo depois do fim do gesto
+    const up = () => { pressing = false; schedule(10) }
+    const change = () => schedule(SELECTION_SETTLE_MS)
+
+    const opts = { passive: true } as const
+    document.addEventListener('mousedown', down, opts)
+    document.addEventListener('touchstart', down, opts)
+    document.addEventListener('mouseup', up, opts)
+    document.addEventListener('touchend', up, opts)
+    document.addEventListener('touchcancel', up, opts)
+    document.addEventListener('selectionchange', change)
+    return () => {
+      window.clearTimeout(timer)
+      document.removeEventListener('mousedown', down)
+      document.removeEventListener('touchstart', down)
+      document.removeEventListener('mouseup', up)
+      document.removeEventListener('touchend', up)
+      document.removeEventListener('touchcancel', up)
+      document.removeEventListener('selectionchange', change)
+    }
+  }, [text, source, onSelectTerm])
+
+  if (!onSelectTerm) return <>{text}</>
+
+  const parts: ReactNode[] = []
+  let last = 0
+  for (const m of text.matchAll(WORD_RE)) {
+    const i = m.index
+    if (i > last) parts.push(text.slice(last, i))
+    const isActive = active?.source === source && active.offset === i
+    const isSaved = savedIds?.has(termId(m[0]))
+    parts.push(
+      <span
+        key={i}
+        data-o={i}
+        className={`cursor-pointer rounded-[5px] transition-colors duration-200 ${
+          isActive ? 'bg-blue-100 text-blue-700' : 'hover:bg-zinc-900/[0.06]'
+        } ${isSaved ? 'underline decoration-blue-300 decoration-dotted decoration-2 underline-offset-[5px]' : ''}`}
+      >
+        {m[0]}
+      </span>,
+    )
+    last = i + m[0].length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+
+  function onClick(e: MouseEvent) {
+    const root = ref.current
+    if (!root || !onSelectTerm) return
+    // seleção livre: já tratada pelos listeners de seleção acima
+    const sel = window.getSelection()
+    if (sel && !sel.isCollapsed && sel.rangeCount && root.contains(sel.getRangeAt(0).commonAncestorContainer)) return
+    // toque numa palavra
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-o]')
+    if (!el || !root.contains(el)) return
+    const offset = Number(el.dataset.o)
+    onSelectTerm({
+      term: cleanTerm(el.textContent ?? ''),
+      context: sentenceAt(text, offset),
+      rect: el.getBoundingClientRect(),
+      source,
+      offset,
+    })
+  }
+
+  return (
+    <span ref={ref} lang="en" onClick={onClick} className="select-text [-webkit-tap-highlight-color:transparent]">
+      {parts}
+    </span>
+  )
+}
 
 function SoundBars({ className = 'h-4' }: { className?: string }) {
   return (
@@ -68,7 +207,7 @@ function Section({ label, accent, children }: { label: string; accent: string; c
   )
 }
 
-function FeedbackCard({ feedback }: { feedback: Feedback }) {
+function FeedbackCard({ feedback, source, vocab }: { feedback: Feedback; source: string; vocab: VocabProps }) {
   const { score, correction, native } = feedback
   const tone = score != null ? scoreTone(score) : null
 
@@ -94,7 +233,7 @@ function FeedbackCard({ feedback }: { feedback: Feedback }) {
 
       <Section label={score == null ? 'Em inglês' : 'Versão nativa'} accent="border-blue-300">
         <div className="flex items-start justify-between gap-1">
-          <span className="pt-1.5">“{native}”</span>
+          <span className="pt-1.5">“<SelectableText text={native} source={source} {...vocab} />”</span>
           {ttsSupported && <ListenButton text={native} small />}
         </div>
       </Section>
@@ -130,12 +269,14 @@ function HiddenContent({ onReveal }: { onReveal?: () => void }) {
 
 /* ---------------- Bolha ---------------- */
 
-interface Props {
+interface Props extends VocabProps {
   message: ChatMessage
   onReveal?: () => void
+  /** id estável da mensagem (origem do termo selecionado) */
+  messageKey: string
 }
 
-export default function MessageBubble({ message, onReveal }: Props) {
+export default function MessageBubble({ message, onReveal, ...rest }: Props) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end animate-in">
@@ -146,19 +287,23 @@ export default function MessageBubble({ message, onReveal }: Props) {
     )
   }
 
-  return <TutorBubble message={message} onReveal={onReveal} />
+  return <TutorBubble message={message} onReveal={onReveal} {...rest} />
 }
 
-function TutorBubble({ message, onReveal }: Props) {
+function TutorBubble({ message, onReveal, messageKey, ...vocab }: Props) {
   const [translated, setTranslated] = useState(false)
   const canTranslate = !message.hidden && !!message.translation
 
   return (
     <div className="flex flex-col items-start gap-1.5 animate-in">
-      {message.feedback && <FeedbackCard feedback={message.feedback} />}
+      {message.feedback && <FeedbackCard feedback={message.feedback} source={`${messageKey}-native`} vocab={vocab} />}
       <div className="flex w-full items-end gap-1">
         <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-3xl rounded-bl-lg bg-white px-4 py-2.5 text-[15px] leading-relaxed text-zinc-900 shadow-sm ring-1 ring-zinc-900/5 sm:max-w-[70%]">
-          {message.hidden ? <HiddenContent onReveal={onReveal} /> : message.content}
+          {message.hidden ? (
+            <HiddenContent onReveal={onReveal} />
+          ) : (
+            <SelectableText text={message.content} source={`${messageKey}-reply`} {...vocab} />
+          )}
           {canTranslate && translated && (
             <p lang="pt-BR" className="mt-2 border-t border-zinc-900/5 pt-2 text-[14px] leading-snug text-zinc-500 animate-in">
               {message.translation}

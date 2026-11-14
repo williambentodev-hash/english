@@ -39,6 +39,7 @@ let autoSignIn: Promise<void> | null = null
 /** Login anônimo automático. Falhando (offline, provedor desativado), o app usa o localStorage. */
 function ensureSignedIn(a: Auth) {
   if (a.currentUser || autoSignIn) return
+  state = { ...state, error: null }
   autoSignIn = signInAnonymously(a)
     .then(() => undefined) // onAuthStateChanged entrega o usuário
     .catch((e) => {
@@ -69,6 +70,37 @@ const subscribe = (l: () => void) => {
 
 export function useAuth(): AuthState {
   return useSyncExternalStore(subscribe, () => state)
+}
+
+/**
+ * Usuário logado, esperando o login automático terminar se ainda estiver em andamento.
+ * Rejeita com o erro do login (com `code` do Firebase) se ele falhou ou não terminou a tempo.
+ */
+export function waitForUser(timeoutMs = 8000): Promise<User> {
+  return new Promise((resolve, reject) => {
+    if (!auth) return reject(new Error('Login indisponível: Firebase não configurado.'))
+    if (state.user) return resolve(state.user)
+    // falha anterior (ex.: abriu offline): tenta de novo agora
+    ensureSignedIn(auth)
+    const done = () => {
+      clearTimeout(timer)
+      listeners.delete(check)
+    }
+    const check = () => {
+      if (state.user) {
+        done()
+        resolve(state.user)
+      } else if (state.error) {
+        done()
+        reject({ code: state.error })
+      }
+    }
+    const timer = setTimeout(() => {
+      done()
+      reject({ code: state.error ?? 'auth/timeout' })
+    }, timeoutMs)
+    listeners.add(check)
+  })
 }
 
 function requireAuth() {
@@ -117,5 +149,7 @@ const MESSAGES: Record<string, string> = {
 
 export function authErrorMessage(e: unknown) {
   const code = (e as { code?: string })?.code
-  return (code && MESSAGES[code]) || 'Não foi possível entrar. Tente novamente.'
+  if (code && MESSAGES[code]) return MESSAGES[code]
+  // código desconhecido: mostra para facilitar o diagnóstico
+  return code ? `Não foi possível entrar (${code}). Tente novamente.` : 'Não foi possível entrar. Tente novamente.'
 }

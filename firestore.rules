@@ -25,5 +25,33 @@ service cloud.firestore {
       allow create: if creatingOwn() && id.matches(request.auth.uid + '_.*');
       allow update: if owns() && request.resource.data.uid == request.auth.uid;
     }
+
+    match /vocabulary/{id} {
+      allow read, delete: if owns();
+      // id = {uid}_{termo normalizado}; salvar o mesmo termo de novo regrava o documento
+      allow create: if creatingOwn() && id.matches(request.auth.uid + '_.*')
+        && request.resource.data.term is string && request.resource.data.term.size() <= 120
+        && request.resource.data.translation is string && request.resource.data.translation.size() <= 200
+        && request.resource.data.context is string && request.resource.data.context.size() <= 1000;
+      allow update: if owns() && request.resource.data.uid == request.auth.uid;
+    }
+
+    // histórico de conversas: id = {uid}_{sessionId}
+    match /chats/{id} {
+      allow read, delete: if owns();
+      allow create: if creatingOwn() && id.matches(request.auth.uid + '_.*')
+        && (!('title' in request.resource.data) || (request.resource.data.title is string && request.resource.data.title.size() <= 200));
+      allow update: if owns() && request.resource.data.uid == request.auth.uid
+        && (!('title' in request.resource.data) || (request.resource.data.title is string && request.resource.data.title.size() <= 200));
+    }
+
+    // mensagens do histórico: id = {uid}_{fraseId}; reenviar a fila offline regrava o mesmo documento
+    match /chat_messages/{id} {
+      allow read, delete: if owns();
+      allow create: if creatingOwn() && id.matches(request.auth.uid + '_.*')
+        && request.resource.data.sessionId is string
+        && request.resource.data.said is string && request.resource.data.reply is string;
+      allow update: if owns() && request.resource.data.uid == request.auth.uid;
+    }
   }
 }

@@ -1,0 +1,49 @@
+# Ambiente completo: front (nginx), back-end (FastAPI) e PostgreSQL com pgvector.
+#
+#   docker compose up --build
+#
+# Front em http://localhost:5173 e API em http://localhost:8000.
+# Antes: preencha .env.local (raiz, com VITE_API_URL=http://localhost:8000) e backend/.env.
+
+services:
+  frontend:
+    build: .
+    ports:
+      # mesma porta do `npm run dev`: já está liberada no CORS do back-end e no Firebase Auth
+      - "5173:80"
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    env_file: backend/.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tutor}:${POSTGRES_PASSWORD:-tutor}@db:5432/${POSTGRES_DB:-tutor}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    # PostgreSQL com a extensão pgvector (busca por similaridade para o RAG)
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tutor}
+      # senha padrão só para desenvolvimento local
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tutor}
+      POSTGRES_DB: ${POSTGRES_DB:-tutor}
+    ports:
+      # só na própria máquina; mude DB_PORT se já tiver um Postgres local na 5432
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # via TCP: durante a criação do banco o Postgres só atende no socket local e ainda não está pronto
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

@@ -24,3 +24,16 @@ export function usePersistentState<T>(key: string, initial: T, isValid: (v: unkn
 }
 
 export const isBoolean = (v: unknown): v is boolean => typeof v === 'boolean'
+
+/** true enquanto a media query casar (atualiza ao redimensionar/girar a tela). */
+export function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const sync = () => setMatches(mq.matches)
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [query])
+  return matches
+}

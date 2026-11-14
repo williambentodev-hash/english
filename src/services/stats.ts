@@ -4,11 +4,12 @@
 // - Sem conexão (ou falha na gravação): a frase vai para uma fila no localStorage, enviada assim
 //   que a conexão volta; enquanto isso o dashboard já a mostra mesclada aos dados da nuvem.
 // - Firebase não configurado: tudo fica só no localStorage deste navegador.
-import { useEffect } from 'react'
-import type { Feedback, Level } from './groq'
-import { isLevel } from './groq'
+import { useEffect, useMemo, useState } from 'react'
+import type { ErrorTag, Feedback, Level, WeakSpot } from './tutor'
+import { forgetMistakes, isLevel, parseTags } from './tutor'
 import { firebaseReady } from '../lib/firebase'
 import { clearStatsRemote, feedbackDocId, recordPhraseRemote, subscribeStatsRemote, type PhraseRecord } from './db'
+import { appendLocalTurn } from './chatStore'
 
 const STORAGE = 'tutor_stats_v1'
 const PENDING = 'tutor_pending_v1'
@@ -36,6 +37,8 @@ export interface CorrectionEntry {
   said: string
   /** explicação do erro, em português */
   correction: string
+  /** categorias do erro (ausente nas correções anteriores a essa classificação) */
+  tags?: ErrorTag[]
   native: string
   score?: number | null
 }
@@ -121,6 +124,7 @@ function applyPhrase(stats: Stats, r: PhraseRecord): Stats {
           level: r.level,
           said: r.said,
           correction: r.feedback.correction,
+          tags: parseTags(r.feedback.tags),
           native: r.feedback.native,
           score: r.feedback.score,
         },
@@ -142,7 +146,9 @@ interface PendingPhrase extends PhraseRecord {
 
 const isPending = (p: any): p is PendingPhrase =>
   p && (p.uid === null || typeof p.uid === 'string') && isLevel(p.level) &&
-  ['id', 'sessionId', 'said', 'reply', 'at'].every((k) => typeof p[k] === 'string')
+  ['id', 'sessionId', 'said', 'reply', 'at'].every((k) => typeof p[k] === 'string') &&
+  (p.translation == null || typeof p.translation === 'string') &&
+  (p.title === undefined || typeof p.title === 'string')
 
 function loadPending(): PendingPhrase[] {
   const data = readJson(PENDING)
@@ -156,6 +162,22 @@ function savePending(list: PendingPhrase[]) {
 }
 
 const pendingFor = (uid: string | null) => loadPending().filter((p) => p.uid === null || p.uid === uid)
+
+/** Frases da fila offline deste usuário que ainda vão para o histórico de conversas. */
+export const pendingChatPhrases = (uid: string | null): PhraseRecord[] => pendingFor(uid).filter((p) => !p.skipChat)
+
+/** Conversa apagada do histórico: as frases da fila dela vão só para as estatísticas. */
+export function detachPendingChat(sessionId: string) {
+  const list = loadPending()
+  if (list.some((p) => p.sessionId === sessionId && !p.skipChat))
+    savePending(list.map((p) => (p.sessionId === sessionId ? { ...p, skipChat: true } : p)))
+}
+
+/** Avisa a cada mudança na fila offline ou nas estatísticas locais. */
+export function onStatsChanged(cb: () => void) {
+  window.addEventListener(CHANGED, cb)
+  return () => window.removeEventListener(CHANGED, cb)
+}
 
 function addPending(p: PendingPhrase) {
   savePending([...loadPending(), p])
@@ -199,19 +221,28 @@ export function usePendingSync(uid: string | null) {
 
 /* ---------------- Gravação ---------------- */
 
-/** Registra uma frase avaliada pela IA. Trocar de nível no meio da conversa abre um novo registro. */
-export async function recordPhrase(
-  uid: string | null,
-  sessionId: string,
-  level: Level,
-  said: string,
-  feedback: Feedback | null,
-  reply: string,
-) {
-  const rec: PhraseRecord = { id: newPhraseId(), sessionId, level, said, feedback, reply, at: new Date().toISOString() }
+export interface NewPhrase {
+  sessionId: string
+  level: Level
+  said: string
+  feedback: Feedback | null
+  reply: string
+  translation: string | null
+  /** só na primeira frase da conversa */
+  title?: string
+}
+
+/**
+ * Registra uma frase avaliada pela IA: estatísticas, correção e histórico da conversa.
+ * Trocar de nível no meio da conversa abre um novo registro de estatística (o histórico continua o mesmo).
+ */
+export async function recordPhrase(uid: string | null, p: NewPhrase) {
+  const rec: PhraseRecord = { ...p, id: newPhraseId(), at: new Date().toISOString() }
+  if (!rec.title) delete rec.title
 
   if (!firebaseReady()) {
     writeJson(STORAGE, applyPhrase(loadStats(), rec))
+    appendLocalTurn(rec)
     return notify()
   }
   // offline ou ainda sem login: guarda na fila e envia depois
@@ -300,9 +331,40 @@ export function subscribeStats(uid: string | null, onView: (v: StatsView) => voi
 
 export const sessionAverage = (s: SessionStat) => (s.scored ? s.scoreSum / s.scored : null)
 
+/* ---------------- Erros recorrentes ---------------- */
+
+/** a partir de quantas ocorrências um erro conta como recorrente para o tutor */
+const RECURRING_MIN = 3
+/** quantas categorias o tutor recebe por vez */
+const TUTOR_WEAK_SPOTS = 3
+
+/**
+ * Conta as correções por categoria, da mais frequente para a menos. Como só as correções mais
+ * recentes ficam carregadas, erros antigos que o aluno superou saem da contagem sozinhos.
+ */
+export function countErrorTags(corrections: CorrectionEntry[]): WeakSpot[] {
+  const counts = new Map<ErrorTag, number>()
+  for (const c of corrections) for (const tag of parseTags(c.tags)) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+  return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count)
+}
+
+/** Erros recorrentes do aluno, em tempo real, para orientar o tutor. */
+export function useWeakSpots(uid: string | null): WeakSpot[] {
+  const [corrections, setCorrections] = useState<CorrectionEntry[]>([])
+  useEffect(() => subscribeStats(uid, (v) => setCorrections(v.stats.corrections)), [uid])
+  return useMemo(
+    () =>
+      countErrorTags(corrections)
+        .filter((w) => w.tag !== 'other' && w.count >= RECURRING_MIN)
+        .slice(0, TUTOR_WEAK_SPOTS),
+    [corrections],
+  )
+}
+
 export async function resetStats(uid: string | null) {
   if (uid && firebaseReady()) {
-    await clearStatsRemote(uid)
+    // o servidor também guarda os erros do aluno (memória do tutor): zerar apaga os dois
+    await Promise.all([clearStatsRemote(uid), forgetMistakes()])
     removeKey(CACHE(uid))
   }
   savePending(loadPending().filter((p) => p.uid !== null && p.uid !== uid))
