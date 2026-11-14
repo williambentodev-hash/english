@@ -28,7 +28,7 @@ def use_verifier(verifier):
 
 def test_health_needs_no_login(client):
     use_verifier(FakeVerifier(InvalidToken()))
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "ok", "memory": False}
 
 
 # ---------------- autenticação ----------------

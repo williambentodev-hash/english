@@ -65,8 +65,9 @@ async def llm_error_handler(_: Request, exc: LLMError) -> JSONResponse:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health(request: Request) -> dict[str, str | bool]:
+    # `memory` mostra se a memória de erros conectou no banco (ajuda a conferir o deploy)
+    return {"status": "ok", "memory": getattr(request.app.state, "memory", None) is not None}
 
 
 @app.post("/api/chat", response_model=TutorReply)
