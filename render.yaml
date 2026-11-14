@@ -1,0 +1,21 @@
+# Blueprint do Render: publica o back-end a partir da imagem Docker em backend/.
+# No Render: New → Blueprint → escolha este repositório e preencha GROQ_API_KEY quando pedir.
+services:
+  - type: web
+    name: english-tutor-api
+    runtime: docker
+    plan: free
+    # região mais próxima do Brasil
+    region: virginia
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    envVars:
+      # segredo: digitado no painel do Render, nunca fica no repositório
+      - key: GROQ_API_KEY
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        value: english-tutor-app-d2cb1
+      # endereços do front no Firebase Hosting
+      - key: CORS_ORIGINS
+        value: https://english-tutor-app-d2cb1.web.app,https://english-tutor-app-d2cb1.firebaseapp.com
