@@ -76,6 +76,10 @@ class MistakeStore(Protocol):
 
     async def delete_user(self, uid: str) -> int: ...
 
+    async def tag_counts(self, uid: str) -> list[tuple[str, int]]: ...
+
+    async def top(self, uid: str, tag: str | None, limit: int) -> list[PastMistake]: ...
+
 
 def _vector(embedding: list[float]) -> str:
     """Formato de texto do pgvector: '[0.1,0.2,...]'."""
@@ -163,6 +167,36 @@ class PgMistakeStore:
         # status no formato "DELETE 3"
         return int(status.split()[-1])
 
+    async def tag_counts(self, uid: str) -> list[tuple[str, int]]:
+        """Quantos erros o aluno cometeu em cada categoria, da mais frequente para a menos."""
+        rows = await self._pool.fetch(
+            """
+            SELECT tag, sum(times)::int AS total
+            FROM mistakes, unnest(tags) AS tag
+            WHERE uid = $1
+            GROUP BY tag
+            ORDER BY total DESC, tag
+            """,
+            uid,
+        )
+        return [(r["tag"], r["total"]) for r in rows]
+
+    async def top(self, uid: str, tag: str | None, limit: int) -> list[PastMistake]:
+        """Erros do aluno (de uma categoria, se informada): os mais repetidos e recentes primeiro."""
+        rows = await self._pool.fetch(
+            """
+            SELECT said, correction, native, tags, times
+            FROM mistakes
+            WHERE uid = $1 AND ($2::text IS NULL OR $2 = ANY(tags))
+            ORDER BY times DESC, last_seen_at DESC
+            LIMIT $3
+            """,
+            uid,
+            tag,
+            limit,
+        )
+        return [PastMistake(r["said"], r["correction"], r["native"], list(r["tags"]), r["times"]) for r in rows]
+
 
 class MistakeMemory:
     def __init__(
@@ -205,6 +239,18 @@ class MistakeMemory:
             )
         except Exception:
             log.warning("memória: gravação falhou", exc_info=True)
+
+    # --- consultas usadas pelo agente de exercícios (podem levantar erro: quem chama decide) ---
+
+    async def weak_spots(self, uid: str) -> list[tuple[str, int]]:
+        return await self._store.tag_counts(uid)
+
+    async def examples(self, uid: str, tag: str | None = None, limit: int = 5) -> list[PastMistake]:
+        return await self._store.top(uid, tag, limit)
+
+    async def search(self, uid: str, query: str, limit: int = 5) -> list[PastMistake]:
+        embedding = await self._embedder.embed(query)
+        return await self._store.search(uid, embedding, limit, self._max_distance)
 
     async def forget(self, uid: str) -> int:
         """Apaga tudo o que foi guardado sobre o aluno. Devolve quantos erros foram apagados."""

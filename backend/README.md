@@ -20,11 +20,22 @@ API em FastAPI que fica entre o app e o LLM. A chave do Groq mora só aqui; o na
 
 A memória é um reforço: sem `DATABASE_URL`, ou com o banco fora do ar, a conversa segue normalmente sem ela.
 
+- **Agente de exercícios**: o modelo recebe ferramentas para consultar o histórico do aluno e decide o que investigar antes de montar exercícios sobre os pontos fracos dele.
+
+### Como o agente funciona
+
+1. O modelo recebe quatro ferramentas: `list_weak_spots` (categorias de erro e contagens), `get_mistakes` (frases reais que o aluno errou), `search_mistakes` (busca por similaridade) e `submit_exercises` (entrega final).
+2. A cada passo ele escolhe uma ferramenta; o servidor executa e devolve o resultado. As consultas usam sempre o usuário do login, nunca um id vindo do modelo.
+3. Entregar sem ter olhado exemplos é recusado uma vez; no quinto passo a entrega é obrigatória.
+4. Cada exercício é validado (lacuna presente, gabarito entre as opções, frase realmente corrigida). Os inválidos são descartados; se nenhum sobra, o erro volta para o modelo corrigir.
+
 | Rota | Descrição |
 | --- | --- |
 | `GET /health` | Verificação de vida (sem login) |
 | `POST /api/chat` | Avalia a última frase do aluno e continua a conversa |
 | `POST /api/translate` | Traduz um termo no contexto da frase |
+| `POST /api/exercises` | Agente gera exercícios sobre os pontos fracos do aluno |
+| `POST /api/exercises/check` | Corrige a resposta escrita de um exercício |
 | `DELETE /api/memory` | Apaga os erros guardados do usuário |
 
 Com o servidor rodando, a documentação interativa fica em `http://localhost:8000/docs`.
@@ -72,6 +83,7 @@ app/
   auth.py        validação do ID token do Firebase (JWT RS256 + JWKS)
   rate_limit.py  janela deslizante em memória
   llm.py         cliente do Groq
+  agent.py       agente de exercícios (laço de ferramentas) e correção de respostas
   memory.py      memória de erros: busca por similaridade e gravação (pgvector)
   embeddings.py  modelo de embeddings local
   prompts.py     prompt do tutor e do dicionário

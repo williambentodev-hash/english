@@ -8,15 +8,27 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .agent import MistakeTools, build_check_messages, generate_exercises
 from .auth import User
 from .config import Settings, get_settings
 from .deps import enforce_rate_limit, get_current_user, get_llm, get_memory
 from .embeddings import FastEmbedEmbedder
 from .llm import GroqClient, LLMError
 from .memory import MistakeMemory, PgMistakeStore, Recall
-from .parsing import parse_term_translation, parse_tutor_reply
+from .parsing import parse_check_result, parse_term_translation, parse_tutor_reply
 from .prompts import build_chat_messages, build_translate_messages
-from .schemas import MAX_USER_MESSAGE, ChatRequest, TermTranslation, TranslateRequest, TutorReply
+from .schemas import (
+    MAX_USER_MESSAGE,
+    ChatRequest,
+    CheckRequest,
+    CheckResult,
+    ExercisesRequest,
+    ExercisesResponse,
+    TermTranslation,
+    TranslateRequest,
+    TutorReply,
+    normalize_answer,
+)
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +124,35 @@ async def translate(
         return parse_term_translation(raw, body.term)
     except ValueError:
         raise HTTPException(502, "Não foi possível traduzir.")
+
+
+@app.post("/api/exercises", response_model=ExercisesResponse)
+async def exercises(
+    body: ExercisesRequest,
+    user: User = Depends(enforce_rate_limit),
+    llm: GroqClient = Depends(get_llm),
+    memory: MistakeMemory | None = Depends(get_memory),
+) -> ExercisesResponse:
+    """Agente que investiga os erros do aluno e monta exercícios sobre os pontos fracos dele."""
+    tools = MistakeTools(memory, user.uid, body.weak_spots)
+    return ExercisesResponse(exercises=await generate_exercises(llm, tools, body.level, body.count))
+
+
+@app.post("/api/exercises/check", response_model=CheckResult)
+async def check_exercise(
+    body: CheckRequest,
+    _user: User = Depends(enforce_rate_limit),
+    llm: GroqClient = Depends(get_llm),
+) -> CheckResult:
+    """Corrige a resposta escrita de um exercício de reescrever (aceita variações corretas)."""
+    if normalize_answer(body.answer) == normalize_answer(body.expected):
+        # igual à resposta esperada: não precisa do modelo
+        return CheckResult(correct=True)
+    raw = await llm.complete(build_check_messages(body.prompt, body.expected, body.answer), max_tokens=256)
+    try:
+        return parse_check_result(raw)
+    except ValueError:
+        raise HTTPException(502, "Não foi possível corrigir agora. Tente de novo.")
 
 
 @app.delete("/api/memory")

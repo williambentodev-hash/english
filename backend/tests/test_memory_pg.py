@@ -106,3 +106,24 @@ async def test_real_model_dimension_and_similarity():
 
     # o limite padrão (0.6) precisa separar a frase parecida da não relacionada
     assert distance(base, similar) < 0.6 < distance(base, unrelated)
+
+
+@needs_db
+async def test_tag_counts_sum_repetitions_per_category(store):
+    await add(store, "test-a", "um", 0, tags=["article", "plural"])
+    await add(store, "test-a", "um", 0, tags=["article", "plural"])  # mesma frase: times = 2
+    await add(store, "test-a", "dois", 5, tags=["article"])
+    await add(store, "test-b", "outro", 0, tags=["spelling"])
+    assert await store.tag_counts("test-a") == [("article", 3), ("plural", 2)]
+    assert await store.tag_counts("test-c") == []
+
+
+@needs_db
+async def test_top_returns_most_repeated_first_and_filters_by_tag(store):
+    await add(store, "test-a", "raro", 0, tags=["article"])
+    await add(store, "test-a", "frequente", 5, tags=["plural"])
+    await add(store, "test-a", "frequente", 5, tags=["plural"])
+    await add(store, "test-b", "outro", 0, tags=["plural"])
+    assert [(m.said, m.times) for m in await store.top("test-a", None, 5)] == [("frequente", 2), ("raro", 1)]
+    assert [m.said for m in await store.top("test-a", "article", 5)] == ["raro"]
+    assert [m.said for m in await store.top("test-a", None, 1)] == ["frequente"]

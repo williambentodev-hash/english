@@ -2,7 +2,7 @@
 import json
 from typing import Any
 
-from .schemas import Feedback, TermTranslation, TutorReply, normalize_score
+from .schemas import CheckResult, Feedback, TermTranslation, TutorReply, normalize_score
 from .tags import parse_tags
 
 
@@ -54,3 +54,12 @@ def parse_term_translation(raw: str, term: str) -> TermTranslation:
         translation=translation,
         base=base if base and base.lower() != term.lower() else None,
     )
+
+
+def parse_check_result(raw: str) -> CheckResult:
+    """Lê a correção de um exercício. Levanta ValueError se o modelo não disse se está certo."""
+    data = _extract_object(raw)
+    correct = data.get("correct")
+    if not isinstance(correct, bool):
+        raise ValueError("sem veredito")
+    return CheckResult(correct=correct, feedback=_text(data.get("feedback")))
