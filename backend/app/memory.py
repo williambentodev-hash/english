@@ -10,6 +10,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Protocol
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import asyncpg
 
@@ -81,6 +82,16 @@ def _vector(embedding: list[float]) -> str:
     return "[" + ",".join(f"{x:.7g}" for x in embedding) + "]"
 
 
+def clean_dsn(dsn: str) -> str:
+    """Remove parâmetros do libpq que o asyncpg não conhece e repassaria ao servidor como configuração.
+
+    Provedores como o Neon entregam a URL com `channel_binding=require`; sem tirar, a conexão falha.
+    """
+    parts = urlsplit(dsn.strip())
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "channel_binding"]
+    return urlunsplit(parts._replace(query=urlencode(query)))
+
+
 class PgMistakeStore:
     def __init__(self, pool: asyncpg.Pool):
         self._pool = pool
@@ -88,7 +99,7 @@ class PgMistakeStore:
     @classmethod
     async def connect(cls, dsn: str) -> "PgMistakeStore":
         pool = await asyncpg.create_pool(
-            dsn,
+            clean_dsn(dsn),
             min_size=1,
             max_size=5,
             command_timeout=5,

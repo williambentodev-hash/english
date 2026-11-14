@@ -4,7 +4,7 @@ import pytest
 
 from app.deps import get_memory
 from app.main import app
-from app.memory import MistakeMemory, PastMistake, _vector
+from app.memory import MistakeMemory, PastMistake, _vector, clean_dsn
 from app.prompts import build_system_prompt
 from app.schemas import Feedback
 from tests.conftest import FakeEmbedder, FakeStore
@@ -87,6 +87,13 @@ async def test_remember_skips_messages_without_correction(memory, store):
 @pytest.mark.anyio
 async def test_remember_swallows_failures(embedder):
     await MistakeMemory(FakeStore(error=ConnectionError()), embedder).remember("u", "I go", FEEDBACK, "beginner")
+
+
+def test_clean_dsn_drops_only_what_asyncpg_rejects():
+    neon = "postgresql://user:p%40ss@ep-x.aws.neon.tech/db?sslmode=require&channel_binding=require"
+    assert clean_dsn(neon) == "postgresql://user:p%40ss@ep-x.aws.neon.tech/db?sslmode=require"
+    local = "postgresql://tutor:tutor@db:5432/tutor"
+    assert clean_dsn(f" {local}\n") == local
 
 
 def test_vector_literal():
