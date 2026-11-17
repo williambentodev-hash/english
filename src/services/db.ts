@@ -80,6 +80,21 @@ export async function saveUserProfile(
   )
 }
 
+/** Meta diária e ofensiva (services/habit.ts valida o formato). */
+export async function loadHabitRemote(uid: string): Promise<unknown> {
+  const snap = await getDoc(doc(firestore(), 'users', uid))
+  return snap.exists() ? snap.data().habit ?? null : null
+}
+
+/** Substitui o campo `habit` inteiro (dias antigos apagados localmente somem também na nuvem). */
+export async function saveHabitRemote(uid: string, habit: object) {
+  await setDoc(
+    doc(firestore(), 'users', uid),
+    { uid, habit, updatedAt: serverTimestamp() },
+    { mergeFields: ['uid', 'habit', 'updatedAt'] },
+  )
+}
+
 /* ---------------- sessions + feedbacks ---------------- */
 
 /** Uma frase do aluno com a avaliação da IA. `id` é único e gerado no aparelho. */

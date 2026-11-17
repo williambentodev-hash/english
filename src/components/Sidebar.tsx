@@ -26,6 +26,7 @@ interface Props {
   onOpenExercises: () => void
   onOpenReview: () => void
   onOpenDictation: () => void
+  onOpenStreak: () => void
   /** palavras com revisão pendente hoje */
   reviewDue: number
   /* rodapé */
@@ -216,6 +217,11 @@ export default function Sidebar(props: Props) {
         <section aria-labelledby="sb-progress" className="shrink-0 border-t border-zinc-900/5 pt-3 pb-2">
           <SectionTitle id="sb-progress">Progresso</SectionTitle>
           <div className="space-y-0.5 px-2">
+            <NavRow
+              label="Meta diária e ofensiva"
+              onClick={props.onOpenStreak}
+              icon={<span className="text-sm leading-none">🔥</span>}
+            />
             <NavRow
               label="Revisar vocabulário"
               onClick={props.onOpenReview}

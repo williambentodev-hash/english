@@ -4,6 +4,7 @@ import { buildDictation, type DictationItem } from '../services/dictation'
 import type { Goal } from '../services/scenarios'
 import { getSpeakingId, SLOWEST_SPEECH_RATE, speak, stopSpeaking, ttsSupported, useIsSpeaking, useSpeechRate } from '../services/speech'
 import { subscribeStats } from '../services/stats'
+import { recordActivity } from '../services/habit'
 
 interface Props {
   uid: string | null
@@ -192,6 +193,7 @@ function DictationCard({ item, last, onNext }: { item: DictationItem; last: bool
     e.preventDefault()
     if (!typed.trim() || result) return
     setResult(matchWords(item.text, typed))
+    recordActivity('listen')
   }
 
   const score = result ? matchScore(result) : 0
