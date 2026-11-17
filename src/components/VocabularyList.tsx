@@ -1,7 +1,8 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import SegmentedControl from './SegmentedControl'
 import { getSpeakingId, speak, stopSpeaking, ttsSupported, useIsSpeaking } from '../services/speech'
-import { removeTerm, saveTerm, setLearned, useVocabulary, type VocabEntry } from '../services/vocabulary'
+import { dueWords, removeTerm, saveTerm, setLearned, useVocabulary, type VocabEntry } from '../services/vocabulary'
+import { isDue } from '../lib/srs'
 
 type Filter = 'all' | 'learning' | 'learned'
 
@@ -66,7 +67,10 @@ function WordCard({ entry, onToggle, onRemove }: { entry: VocabEntry; onToggle: 
       )}
 
       <div className="mt-3 flex items-center gap-1">
-        <span className="text-[11px] text-zinc-400">{fmtDate(date)}</span>
+        <span className="text-[11px] text-zinc-400">
+          {fmtDate(date)}
+          {!learned && <> · {isDue(entry) ? 'revisar hoje' : `revisão ${fmtDate(entry.due!)}`}</>}
+        </span>
         <button
           type="button"
           onClick={onToggle}
@@ -96,7 +100,7 @@ function WordCard({ entry, onToggle, onRemove }: { entry: VocabEntry; onToggle: 
   )
 }
 
-export default function VocabularyList({ uid }: { uid: string | null }) {
+export default function VocabularyList({ uid, onReview }: { uid: string | null; onReview?: () => void }) {
   const { entries, error } = useVocabulary(uid)
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
@@ -111,6 +115,7 @@ export default function VocabularyList({ uid }: { uid: string | null }) {
 
   const all = entries ?? []
   const learnedCount = all.filter((e) => e.learned).length
+  const due = dueWords(entries).length
 
   const visible = useMemo(() => {
     const q = normalize(search.trim())
@@ -175,6 +180,22 @@ export default function VocabularyList({ uid }: { uid: string | null }) {
 
   return (
     <div className="space-y-3">
+      {onReview && due > 0 && (
+        <button
+          type="button"
+          onClick={onReview}
+          className="flex min-h-14 w-full items-center gap-3 rounded-3xl bg-blue-500 px-4 text-left text-white shadow-sm shadow-blue-500/25 transition-all duration-300 ease-out hover:bg-blue-600 active:scale-[0.98]"
+        >
+          <span className="text-xl" aria-hidden>🧠</span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-semibold">Revisar agora</span>
+            <span className="block text-xs text-blue-100">
+              {due} {due === 1 ? 'palavra pendente' : 'palavras pendentes'} hoje
+            </span>
+          </span>
+          <span aria-hidden>›</span>
+        </button>
+      )}
       <SegmentedControl<Filter>
         label="Filtrar vocabulário"
         value={filter}

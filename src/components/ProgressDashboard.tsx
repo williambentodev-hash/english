@@ -266,9 +266,11 @@ interface DashboardProps {
   /** aba aberta ao entrar (Evolução ou Vocabulário) */
   initialTab?: DashboardTab
   onClose: () => void
+  /** abre a revisão espaçada do vocabulário */
+  onReview?: () => void
 }
 
-export default function ProgressDashboard({ uid, initialTab = 'progress', onClose }: DashboardProps) {
+export default function ProgressDashboard({ uid, initialTab = 'progress', onClose, onReview }: DashboardProps) {
   const [tab, setTab] = useState<DashboardTab>(initialTab)
   const [view, setView] = useState<StatsView | null>(null)
   const [busy, setBusy] = useState(false)
@@ -367,7 +369,7 @@ export default function ProgressDashboard({ uid, initialTab = 'progress', onClos
 
       <div className="mx-auto max-w-2xl space-y-3 px-4 pt-4 pb-[calc(2rem+env(safe-area-inset-bottom))]">
         {tab === 'vocabulary' ? (
-          <VocabularyList uid={uid} />
+          <VocabularyList uid={uid} onReview={onReview} />
         ) : (
         <>
         {view && <SyncStatus view={view} cloudUser={!!uid} />}

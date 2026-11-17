@@ -30,6 +30,7 @@ import {
 import { db } from '../lib/firebase'
 import { isLevel, parseTags, type Feedback, type Level } from './tutor'
 import { isGoal, MAX_PROFESSION, type Goal } from './scenarios'
+import { MASTERED_BOX, type ReviewState } from '../lib/srs'
 import type { CorrectionEntry, SessionStat, Stats } from './stats'
 
 const MAX_SESSIONS = 200
@@ -303,6 +304,9 @@ export interface VocabEntry {
   /** ISO de quando foi salvo */
   date: string
   learned: boolean
+  /** revisão espaçada (lib/srs.ts): caixa atual e próxima revisão (null = nunca revisada) */
+  box: number
+  due: string | null
 }
 
 const vocabDocId = (uid: string, id: string) => `${uid}_${id}`
@@ -317,6 +321,9 @@ export function toVocabEntry(x: any, id: string): VocabEntry | null {
     context: typeof x.context === 'string' ? x.context : '',
     date: x.date,
     learned: x.learned === true,
+    // palavras salvas antes da revisão espaçada começam na caixa 0, já pendentes
+    box: Number.isInteger(x.box) && x.box >= 0 && x.box <= MASTERED_BOX ? x.box : 0,
+    due: typeof x.due === 'string' && !Number.isNaN(Date.parse(x.due)) ? x.due : null,
   }
 }
 
@@ -328,6 +335,10 @@ export function saveVocabRemote(uid: string, e: VocabEntry) {
 
 export function setVocabLearnedRemote(uid: string, id: string, learned: boolean) {
   return updateDoc(doc(firestore(), 'vocabulary', vocabDocId(uid, id)), { learned })
+}
+
+export function setVocabReviewRemote(uid: string, id: string, review: ReviewState) {
+  return updateDoc(doc(firestore(), 'vocabulary', vocabDocId(uid, id)), { ...review })
 }
 
 export function deleteVocabRemote(uid: string, id: string) {

@@ -24,6 +24,9 @@ interface Props {
   /* progresso */
   onOpenProgress: (tab: DashboardTab) => void
   onOpenExercises: () => void
+  onOpenReview: () => void
+  /** palavras com revisão pendente hoje */
+  reviewDue: number
   /* rodapé */
   cloud: boolean
   authReady: boolean
@@ -58,16 +61,23 @@ const SectionTitle = ({ id, children }: { id: string; children: ReactNode }) => 
   </h3>
 )
 
-function NavRow({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
+function NavRow({ icon, label, onClick, badge }: { icon: ReactNode; label: string; onClick: () => void; badge?: number }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-label={badge ? `${label} (${badge} pendentes)` : undefined}
       className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-zinc-700 transition-all duration-200 ease-out hover:bg-zinc-900/5 active:scale-[0.98]"
     >
       <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white text-zinc-500 shadow-sm ring-1 ring-zinc-900/5">{icon}</span>
       <span className="flex-1 text-left">{label}</span>
-      <span className="text-zinc-300" aria-hidden>›</span>
+      {badge ? (
+        <span className="min-w-6 rounded-full bg-blue-500 px-1.5 py-0.5 text-center text-[11px] font-semibold tabular-nums text-white" aria-hidden>
+          {badge > 99 ? '99+' : badge}
+        </span>
+      ) : (
+        <span className="text-zinc-300" aria-hidden>›</span>
+      )}
     </button>
   )
 }
@@ -205,6 +215,17 @@ export default function Sidebar(props: Props) {
         <section aria-labelledby="sb-progress" className="shrink-0 border-t border-zinc-900/5 pt-3 pb-2">
           <SectionTitle id="sb-progress">Progresso</SectionTitle>
           <div className="space-y-0.5 px-2">
+            <NavRow
+              label="Revisar vocabulário"
+              onClick={props.onOpenReview}
+              badge={props.reviewDue}
+              icon={
+                <Icon className="h-4 w-4">
+                  <rect x="3" y="6" width="14" height="14" rx="2" />
+                  <path d="M7 3h12a2 2 0 0 1 2 2v12" />
+                </Icon>
+              }
+            />
             <NavRow
               label="Exercícios para você"
               onClick={props.onOpenExercises}
