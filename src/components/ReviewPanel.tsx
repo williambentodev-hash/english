@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { fmtInterval, MASTERED_BOX, nextIntervalDays, PRODUCE_FROM_BOX, schedule } from '../lib/srs'
 import { getSpeakingId, speak, stopSpeaking, ttsSupported, useIsSpeaking, useSpeechRecognition } from '../services/speech'
 import { dueWords, recordReview, useVocabulary, type VocabEntry } from '../services/vocabulary'
+import { recordActivity } from '../services/habit'
 
 interface Props {
   uid: string | null
@@ -46,6 +47,7 @@ export default function ReviewPanel({ uid, onClose, onStartChat }: Props) {
   function answer(entry: VocabEntry, correct: boolean) {
     const next = schedule(entry, correct)
     recordReview(uid, entry.id, next).catch((e) => console.warn('[review] falha ao gravar', e))
+    recordActivity('vocab')
     if (!missed.current.has(entry.id)) {
       setFirstTry((s) => ({ right: s.right + (correct ? 1 : 0), total: s.total + 1 }))
     }

@@ -4,7 +4,8 @@ import { useSpeechRecognition } from '../services/speech'
 
 interface Props {
   disabled?: boolean
-  onSend: (text: string) => void
+  /** `spoken`: a mensagem foi ditada pelo microfone (conta como fala na meta diária) */
+  onSend: (text: string, spoken: boolean) => void
   /** frase a colocar no campo (sugestão tocada); `n` muda a cada toque, mesmo com o texto igual */
   draft?: { text: string; n: number } | null
 }
@@ -20,15 +21,20 @@ export default function ChatInput({ disabled, onSend, draft }: Props) {
   const baseText = useRef('') // texto que já estava no input antes de começar a falar
   const press = useRef<{ at: number; startedNow: boolean } | null>(null)
   const lastPointerUp = useRef(0) // o `click` logo após um toque/clique já foi tratado no pointerdown
+  const spoken = useRef(false) // o rascunho atual teve fala pelo microfone
 
   // a fala é costurada ao que já estava digitado (maiúscula só depois de . ! ?)
-  const mic = useSpeechRecognition((spoken) => setText(appendTranscript(baseText.current, spoken)))
+  const mic = useSpeechRecognition((said) => {
+    spoken.current = true
+    setText(appendTranscript(baseText.current, said))
+  })
 
   // sugestão tocada: substitui o rascunho, para o aluno ler, adaptar e enviar
   const stopMic = mic.stop
   useEffect(() => {
     if (!draft) return
     stopMic()
+    spoken.current = false
     setText(draft.text)
     // com teclado físico o cursor já vai para o campo; no celular o teclado não sobe sozinho
     if (window.matchMedia('(pointer: fine)').matches) ref.current?.focus()
@@ -48,7 +54,8 @@ export default function ChatInput({ disabled, onSend, draft }: Props) {
     e?.preventDefault()
     if (!canSend) return
     mic.stop()
-    onSend(text.trim())
+    onSend(text.trim(), spoken.current)
+    spoken.current = false
     setText('')
   }
 
@@ -132,7 +139,11 @@ export default function ChatInput({ disabled, onSend, draft }: Props) {
           rows={1}
           value={text}
           placeholder={mic.listening ? 'Listening…' : mic.error ?? 'Write in English…'}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            // apagou tudo: o próximo rascunho começa do zero (digitado, até usar o microfone)
+            if (!e.target.value) spoken.current = false
+            setText(e.target.value)
+          }}
           onKeyDown={onKeyDown}
           className={`flex-1 min-h-11 max-h-32 resize-none rounded-3xl bg-zinc-100 px-4 py-2.5 text-base leading-6 outline-none ring-1 transition-all duration-300 ease-out focus:bg-white focus:ring-zinc-300 ${
             mic.listening ? 'bg-white ring-red-200' : mic.error ? 'ring-transparent placeholder:text-red-400' : 'ring-transparent'

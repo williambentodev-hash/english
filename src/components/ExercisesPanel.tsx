@@ -8,6 +8,7 @@ import {
   type Level,
   type WeakSpot,
 } from '../services/tutor'
+import { recordActivity } from '../services/habit'
 
 interface Props {
   level: Level
@@ -101,6 +102,8 @@ export default function ExercisesPanel({ level, weakSpots, onClose }: Props) {
             exercise={load.exercises[index]}
             last={index === total - 1}
             onDone={(correct) => {
+              // exercício respondido conta como escrita na meta diária
+              recordActivity('write')
               if (correct) setScore((s) => s + 1)
               setIndex((i) => i + 1)
             }}

@@ -21,6 +21,9 @@ import { chatTitle, deleteChat, endChat, loadChat, useChatHistory, type ChatTurn
 import { dueWords, termId, useVocabulary } from './services/vocabulary'
 import ReviewPanel from './components/ReviewPanel'
 import DictationPanel from './components/DictationPanel'
+import DailyGoalCard, { StreakFlame } from './components/DailyGoalCard'
+import StreakPanel from './components/StreakPanel'
+import { GOAL_DONE, recordActivity, setVocabCleared, useHabit } from './services/habit'
 
 
 // botão de ícone do header: alvo de toque de 44px, sem quebra de linha
@@ -101,9 +104,39 @@ export default function App() {
   const savedVocab = useMemo(() => new Map((vocab ?? []).map((v) => [v.id, v])), [vocab])
   const savedIds = useMemo(() => new Set(savedVocab.keys()), [savedVocab])
   // revisão espaçada: palavras pendentes hoje (contador na sidebar e lembrete no início da conversa)
+  const reviewDue = useMemo(() => dueWords(vocab).length, [vocab])
   const [showReview, setShowReview] = useState(false)
   const [showDictation, setShowDictation] = useState(false)
-  const reviewDue = useMemo(() => dueWords(vocab).length, [vocab])
+  // meta diária e ofensiva
+  const habit = useHabit(uid)
+  const [showStreak, setShowStreak] = useState(false)
+  const [celebrate, setCelebrate] = useState<number | null>(null)
+  const openDictation = () => {
+    closeDrawer()
+    setShowDictation(true)
+  }
+  const openStreak = () => {
+    closeDrawer()
+    setShowStreak(true)
+  }
+  // vocabulário sem nada pendente conta como cumprido (não dá para revisar o que não existe)
+  useEffect(() => {
+    if (vocab !== null) setVocabCleared(reviewDue === 0)
+  }, [vocab, reviewDue])
+  // meta do dia cumprida: aviso por alguns segundos
+  useEffect(() => {
+    let timer: number | undefined
+    const onDone = (e: Event) => {
+      setCelebrate((e as CustomEvent<number>).detail)
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => setCelebrate(null), 5000)
+    }
+    window.addEventListener(GOAL_DONE, onDone)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener(GOAL_DONE, onDone)
+    }
+  }, [])
   const openReview = () => {
     closeDrawer()
     setProgressTab(null)
@@ -198,8 +231,10 @@ export default function App() {
     setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, hidden: false } : msg)))
   }
 
-  async function handleSend(text: string) {
+  async function handleSend(text: string, spoken = false) {
     const sid = sessionId.current
+    // respondeu a uma fala do tutor que só tinha ouvido (modo escuta): conta também como escuta
+    const answeredByEar = messages.some((m) => m.hidden)
     const first = !started
     const ctrl = new AbortController()
     inflight.current = ctrl
@@ -226,6 +261,8 @@ export default function App() {
       )
       if (ctrl.signal.aborted) return
       setMessages((m) => [...m, { role: 'assistant', content: reply, feedback, translation, suggestions, hidden: blind }])
+      recordActivity(spoken ? 'speak' : 'write')
+      if (answeredByEar) recordActivity('listen')
       void recordPhrase(uid, {
         sessionId: sid,
         level,
@@ -272,10 +309,8 @@ export default function App() {
           setShowExercises(true)
         }}
         onOpenReview={openReview}
-        onOpenDictation={() => {
-          closeDrawer()
-          setShowDictation(true)
-        }}
+        onOpenDictation={openDictation}
+        onOpenStreak={openStreak}
         reviewDue={reviewDue}
         cloud={cloud}
         authReady={authReady}
@@ -315,6 +350,14 @@ export default function App() {
           </div>
           {/* atalhos rápidos: modo escuta e nova conversa (o resto fica na sidebar) */}
           <nav className="flex shrink-0 items-center" aria-label="Atalhos">
+            <button
+              onClick={openStreak}
+              aria-label={`Ofensiva: ${habit.streak.current} ${habit.streak.current === 1 ? 'dia' : 'dias'}${habit.streak.todayDone ? ', meta de hoje cumprida' : ''}`}
+              title="Meta diária e ofensiva"
+              className="flex h-11 shrink-0 items-center rounded-full px-2.5 text-[15px] transition-all duration-300 ease-out hover:bg-zinc-100 active:scale-95"
+            >
+              <StreakFlame days={habit.streak.current} lit={habit.streak.todayDone} />
+            </button>
             {ttsSupported && (
               <button
                 onClick={() => setBlind(!blindPref)}
@@ -343,21 +386,12 @@ export default function App() {
             🎧 Modo escuta: as respostas chegam só em áudio. Responda para ver o texto.
           </p>
         )}
-        {!started && reviewDue > 0 && (
-          <button
-            type="button"
-            onClick={openReview}
-            className="flex min-h-12 w-full items-center gap-3 rounded-2xl bg-white px-4 text-left shadow-sm ring-1 ring-zinc-900/5 transition-all duration-300 ease-out hover:bg-zinc-50 active:scale-[0.99] animate-in"
-          >
-            <span className="text-lg" aria-hidden>🧠</span>
-            <span className="min-w-0 flex-1 text-sm">
-              <span className="font-medium text-zinc-800">
-                {reviewDue} {reviewDue === 1 ? 'palavra para revisar' : 'palavras para revisar'} hoje
-              </span>
-              <span className="block text-xs text-zinc-500">Leva 2 minutos e fixa o que você já viu</span>
-            </span>
-            <span className="text-sm font-semibold text-blue-500">Revisar</span>
-          </button>
+        {!started && (
+          <DailyGoalCard
+            view={habit}
+            onOpenStreak={openStreak}
+            actions={{ listen: openDictation, ...(reviewDue > 0 ? { vocab: openReview } : {}) }}
+          />
         )}
         {!started && <ScenarioPicker goal={goal} value={scenario} onChange={pickScenario} />}
         {messages.map((m, i) => (
@@ -401,6 +435,25 @@ export default function App() {
       )}
 
       {showDictation && <DictationPanel uid={uid} goal={goal} onClose={() => setShowDictation(false)} />}
+
+      {showStreak && <StreakPanel view={habit} onClose={() => setShowStreak(false)} />}
+
+      {celebrate !== null && (
+        <div
+          role="status"
+          className="pointer-events-none fixed inset-x-0 top-[calc(4rem+env(safe-area-inset-top))] z-[70] flex justify-center px-4 animate-in"
+        >
+          <div className="flex items-center gap-3 rounded-2xl bg-zinc-900/90 py-3 pr-5 pl-4 text-white shadow-lg backdrop-blur-md">
+            <span className="text-3xl" aria-hidden>🔥</span>
+            <span className="leading-tight">
+              <span className="block text-[15px] font-semibold">Meta do dia cumprida!</span>
+              <span className="block text-sm text-zinc-300">
+                Ofensiva de {celebrate} {celebrate === 1 ? 'dia' : 'dias'}. Até amanhã!
+              </span>
+            </span>
+          </div>
+        </div>
+      )}
 
       {showReview && (
         <ReviewPanel

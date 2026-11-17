@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { matchScore, matchWords } from '../lib/compare'
 import { stopSpeaking, useSpeechRecognition } from '../services/speech'
 import { checkRewrite, type CheckResult } from '../services/tutor'
+import { recordActivity } from '../services/habit'
 
 const smallBtn =
   'flex min-h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-all duration-300 ease-out active:scale-95'
@@ -49,6 +50,15 @@ export function RepeatPractice({ native, onDone }: { native: string; onDone: () 
   }, [all, heard, mic.listening, stop])
 
   const finished = !mic.listening && !!heard
+
+  // cada tentativa com fala reconhecida conta uma frase falada na meta diária
+  const counted = useRef(-1)
+  useEffect(() => {
+    if (finished && counted.current !== tries) {
+      counted.current = tries
+      recordActivity('speak')
+    }
+  }, [finished, tries])
 
   return (
     <div className="space-y-2 animate-in">
@@ -140,6 +150,7 @@ export function RetryPractice({ said, native, onDone }: { said: string; native: 
     setError(null)
     try {
       setResult(await checkRewrite(said, native, answer))
+      recordActivity('write')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível conferir agora.')
     } finally {
