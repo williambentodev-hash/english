@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import type { ChatMessage, Feedback } from '../services/tutor'
-import { getSpeakingId, speak, stopSpeaking, ttsSupported, useIsSpeaking } from '../services/speech'
+import { getSpeakingId, speak, stopSpeaking, sttSupported, ttsSupported, useIsSpeaking } from '../services/speech'
+import { MicIcon, RepeatPractice, RetryPractice, smallBtn } from './FeedbackPractice'
 import { cleanTerm, sentenceAt, termId } from '../services/vocabulary'
 import type { TermSelection } from './WordPopover'
 
@@ -207,19 +208,28 @@ function Section({ label, accent, children }: { label: string; accent: string; c
   )
 }
 
+type Practice = 'repeat' | 'retry' | null
+
 function FeedbackCard({
   feedback,
+  said,
   source,
   vocab,
   onUseText,
 }: {
   feedback: Feedback
+  /** frase do aluno que foi avaliada (para o "Tentar de novo") */
+  said?: string
   source: string
   vocab: VocabProps
   onUseText?: (text: string) => void
 }) {
   const { score, correction, native } = feedback
   const tone = score != null ? scoreTone(score) : null
+  const [practice, setPractice] = useState<Practice>(null)
+  const close = () => setPractice(null)
+  // só pede para reescrever quando houve erro de fato e a frase original está disponível
+  const canRetry = !!correction && score != null && !!said
 
   return (
     <div className="w-full max-w-[85%] space-y-2.5 rounded-2xl bg-white/60 p-3 ring-1 ring-zinc-900/5 sm:max-w-[70%]">
@@ -237,17 +247,58 @@ function FeedbackCard({
         <p className="text-xs font-medium text-zinc-500">Em inglês fica assim. Agora tente você 🙂</p>
       )}
 
-      {correction && (
+      {/* reescrevendo de memória: a correção fica escondida até conferir */}
+      {correction && practice !== 'retry' && (
         <Section label="Onde errou" accent="border-amber-300">{correction}</Section>
       )}
 
-      <Section label={score == null ? 'Em inglês' : 'Versão nativa'} accent="border-blue-300">
-        <div className="flex items-start justify-between gap-1">
-          <span className="pt-1.5">“<SelectableText text={native} source={source} {...vocab} />”</span>
-          {ttsSupported && <ListenButton text={native} small />}
-        </div>
+      <Section
+        label={practice === 'retry' ? 'Tente de novo' : score == null ? 'Em inglês' : 'Versão nativa'}
+        accent="border-blue-300"
+      >
+        {practice === 'retry' && said ? (
+          <RetryPractice said={said} native={native} onDone={close} />
+        ) : (
+          <div className="flex items-start justify-between gap-1">
+            {practice === 'repeat' ? (
+              <div className="min-w-0 flex-1 pt-1.5">
+                <RepeatPractice native={native} onDone={close} />
+              </div>
+            ) : (
+              <span className="pt-1.5">“<SelectableText text={native} source={source} {...vocab} />”</span>
+            )}
+            {ttsSupported && <ListenButton text={native} small />}
+          </div>
+        )}
+        {practice === null && (sttSupported || canRetry) && (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {sttSupported && (
+              <button
+                type="button"
+                onClick={() => setPractice('repeat')}
+                className={`${smallBtn} bg-zinc-900/[0.04] text-zinc-600 hover:bg-zinc-900/[0.08]`}
+              >
+                <MicIcon />
+                Repetir em voz alta
+              </button>
+            )}
+            {canRetry && (
+              <button
+                type="button"
+                onClick={() => setPractice('retry')}
+                className={`${smallBtn} bg-zinc-900/[0.04] text-zinc-600 hover:bg-zinc-900/[0.08]`}
+              >
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+                Tentar de novo
+              </button>
+            )}
+          </div>
+        )}
         {/* escreveu em português: leva a frase em inglês para o campo, para repetir e enviar */}
-        {score == null && onUseText && (
+        {score == null && onUseText && practice === null && (
           <button
             type="button"
             onClick={() => onUseText(native)}
@@ -296,6 +347,8 @@ interface Props extends VocabProps {
   messageKey: string
   /** coloca uma frase em inglês no campo de texto */
   onUseText?: (text: string) => void
+  /** frase do aluno respondida por esta mensagem do tutor (avaliada no feedback) */
+  said?: string
 }
 
 export default function MessageBubble({ message, onReveal, ...rest }: Props) {
@@ -312,14 +365,20 @@ export default function MessageBubble({ message, onReveal, ...rest }: Props) {
   return <TutorBubble message={message} onReveal={onReveal} {...rest} />
 }
 
-function TutorBubble({ message, onReveal, messageKey, onUseText, ...vocab }: Props) {
+function TutorBubble({ message, onReveal, messageKey, onUseText, said, ...vocab }: Props) {
   const [translated, setTranslated] = useState(false)
   const canTranslate = !message.hidden && !!message.translation
 
   return (
     <div className="flex flex-col items-start gap-1.5 animate-in">
       {message.feedback && (
-        <FeedbackCard feedback={message.feedback} source={`${messageKey}-native`} vocab={vocab} onUseText={onUseText} />
+        <FeedbackCard
+          feedback={message.feedback}
+          said={said}
+          source={`${messageKey}-native`}
+          vocab={vocab}
+          onUseText={onUseText}
+        />
       )}
       <div className="flex w-full items-end gap-1">
         <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-3xl rounded-bl-lg bg-white px-4 py-2.5 text-[15px] leading-relaxed text-zinc-900 shadow-sm ring-1 ring-zinc-900/5 sm:max-w-[70%]">

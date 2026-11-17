@@ -362,6 +362,7 @@ export default function App() {
             active={termSel}
             savedIds={savedIds}
             onUseText={fillInput}
+            said={m.role === 'assistant' && messages[i - 1]?.role === 'user' ? messages[i - 1].content : undefined}
           />
         ))}
         <Suggestions suggestions={suggestions} onPick={fillInput} />

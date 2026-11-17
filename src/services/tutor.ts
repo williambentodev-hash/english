@@ -215,11 +215,17 @@ export interface CheckResult {
 
 /** Corrige a resposta escrita de um exercício de reescrever (aceita variações corretas). */
 export function checkExercise(exercise: Exercise, answer: string): Promise<CheckResult> {
-  return callBackend<CheckResult>('/api/exercises/check', {
-    prompt: exercise.prompt,
-    expected: exercise.answer,
-    answer,
-  })
+  return checkRewrite(exercise.prompt, exercise.answer, answer)
+}
+
+/**
+ * Confere se `answer` corrige a frase errada `prompt` (esperado: `expected`, mas variações corretas
+ * valem). Usado também no "Tentar de novo" do cartão de correção da conversa.
+ */
+export function checkRewrite(prompt: string, expected: string, answer: string): Promise<CheckResult> {
+  // limites do servidor (CheckRequest): frases muito longas são cortadas
+  const cut = (s: string) => s.trim().slice(0, 500)
+  return callBackend<CheckResult>('/api/exercises/check', { prompt: cut(prompt), expected: cut(expected), answer: cut(answer) })
 }
 
 /**
