@@ -13,13 +13,14 @@ import ScenarioPicker from './components/ScenarioPicker'
 import Suggestions from './components/Suggestions'
 import { FREE, getScenario, isGoal, type Goal } from './services/scenarios'
 import { isBoolean, isString, useMediaQuery, usePersistentState } from './services/prefs'
-import { ttsSupported, useSpeechRate } from './services/speech'
+import { DEFAULT_SPEECH_RATE, setSpeechRate, ttsSupported, useSpeechRate } from './services/speech'
 import { useAuth } from './services/auth'
 import { useProfileSync } from './services/profileSync'
 import { newSessionId, recordPhrase, usePendingSync, useWeakSpots } from './services/stats'
 import { chatTitle, deleteChat, endChat, loadChat, useChatHistory, type ChatTurn } from './services/history'
 import { dueWords, termId, useVocabulary } from './services/vocabulary'
 import ReviewPanel from './components/ReviewPanel'
+import DictationPanel from './components/DictationPanel'
 
 
 // botão de ícone do header: alvo de toque de 44px, sem quebra de linha
@@ -101,6 +102,7 @@ export default function App() {
   const savedIds = useMemo(() => new Set(savedVocab.keys()), [savedVocab])
   // revisão espaçada: palavras pendentes hoje (contador na sidebar e lembrete no início da conversa)
   const [showReview, setShowReview] = useState(false)
+  const [showDictation, setShowDictation] = useState(false)
   const reviewDue = useMemo(() => dueWords(vocab).length, [vocab])
   const openReview = () => {
     closeDrawer()
@@ -134,6 +136,8 @@ export default function App() {
     setGoal(choice.goal)
     setProfession(choice.profession)
     setOnboarded(true)
+    // iniciante começa com a voz mais devagar (dá para mudar em Ajustes)
+    if (choice.level === 'beginner') setSpeechRate(DEFAULT_SPEECH_RATE)
     // quem veio pelo trabalho já começa numa situação de trabalho
     if (choice.goal === 'work') pickScenario('work_intro')
   }
@@ -268,6 +272,10 @@ export default function App() {
           setShowExercises(true)
         }}
         onOpenReview={openReview}
+        onOpenDictation={() => {
+          closeDrawer()
+          setShowDictation(true)
+        }}
         reviewDue={reviewDue}
         cloud={cloud}
         authReady={authReady}
@@ -391,6 +399,8 @@ export default function App() {
       {progressTab && (
         <ProgressDashboard uid={uid} initialTab={progressTab} onClose={() => setProgressTab(null)} onReview={openReview} />
       )}
+
+      {showDictation && <DictationPanel uid={uid} goal={goal} onClose={() => setShowDictation(false)} />}
 
       {showReview && (
         <ReviewPanel

@@ -16,7 +16,7 @@ interface Props {
   onClose: () => void
 }
 
-// do mais rápido para o mais lento, como pedido no layout (1×, 0.9×, 0.75×)
+// do mais rápido para o mais lento (1×, 0.9×, 0.75×, 0.6×)
 const RATE_OPTIONS = [...SPEECH_RATES].reverse().map((r) => ({ id: r, label: `${r}×` }))
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
@@ -104,7 +104,8 @@ export default function SettingsModal({
         </Section>
 
         {ttsSupported && (
-          <Section title="Velocidade da voz">
+          <Section title="Velocidade da voz" hint="Começando? Use 0.75× ou 0.6× e aumente quando ficar fácil de entender.">
+
             <SegmentedControl label="Velocidade da voz" options={RATE_OPTIONS} value={rate} onChange={setSpeechRate} />
           </Section>
         )}
