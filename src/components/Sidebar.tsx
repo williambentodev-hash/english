@@ -25,6 +25,7 @@ interface Props {
   onOpenProgress: (tab: DashboardTab) => void
   onOpenExercises: () => void
   onOpenReview: () => void
+  onOpenDictation: () => void
   /** palavras com revisão pendente hoje */
   reviewDue: number
   /* rodapé */
@@ -223,6 +224,17 @@ export default function Sidebar(props: Props) {
                 <Icon className="h-4 w-4">
                   <rect x="3" y="6" width="14" height="14" rx="2" />
                   <path d="M7 3h12a2 2 0 0 1 2 2v12" />
+                </Icon>
+              }
+            />
+            <NavRow
+              label="Ditado (escuta)"
+              onClick={props.onOpenDictation}
+              icon={
+                <Icon className="h-4 w-4">
+                  <path d="M3 14v-2a9 9 0 0 1 18 0v2" />
+                  <rect x="3" y="14" width="4.5" height="6.5" rx="2" />
+                  <rect x="16.5" y="14" width="4.5" height="6.5" rx="2" />
                 </Icon>
               }
             />

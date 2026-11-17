@@ -333,17 +333,21 @@ function scoreVoice(v: SpeechSynthesisVoice) {
 }
 
 /* Velocidade da fala, escolhida pelo usuário e salva no localStorage. */
-export const SPEECH_RATES = [0.75, 0.9, 1] as const
+export const SPEECH_RATES = [0.6, 0.75, 0.9, 1] as const
 export type SpeechRate = (typeof SPEECH_RATES)[number]
 const RATE_KEY = 'tutor_speech_rate'
 export const isSpeechRate = (v: unknown): v is SpeechRate => SPEECH_RATES.includes(v as SpeechRate)
+/** padrão de quem nunca escolheu: mais devagar que o normal, pensado para quem está começando */
+export const DEFAULT_SPEECH_RATE: SpeechRate = 0.75
+/** "ouvir mais devagar" do ditado */
+export const SLOWEST_SPEECH_RATE: SpeechRate = SPEECH_RATES[0]
 
 let speechRate: SpeechRate = (() => {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(RATE_KEY) ?? 'null')
-    return isSpeechRate(v) ? v : 1
+    return isSpeechRate(v) ? v : DEFAULT_SPEECH_RATE
   } catch {
-    return 1
+    return DEFAULT_SPEECH_RATE
   }
 })()
 const rateListeners = new Set<() => void>()
@@ -410,7 +414,8 @@ export function toSpeakable(text: string) {
   return main || clean(text.replace(/[[\]]/g, ''))
 }
 
-export function speak(id: string, text: string) {
+/** Lê `text` em voz alta. `rate` sobrepõe a velocidade escolhida em Ajustes (ex.: "mais devagar" no ditado). */
+export function speak(id: string, text: string, rate: number = speechRate) {
   if (!ttsSupported) return
   abortListening() // nunca ouvir o próprio alto-falante
   const synth = window.speechSynthesis
@@ -424,7 +429,7 @@ export function speak(id: string, text: string) {
     const u = new SpeechSynthesisUtterance(chunk)
     if (voice) u.voice = voice
     u.lang = voice?.lang ?? LANG
-    u.rate = speechRate // 0.75 = mais lento e pausado (treino de listening), 1 = normal
+    u.rate = rate // 0.6 = bem devagar, 0.75 = pausado (padrão), 1 = normal
     u.pitch = 1.0
     if (i === chunks.length - 1) u.onend = done
     u.onerror = done
