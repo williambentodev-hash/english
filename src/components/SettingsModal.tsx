@@ -1,11 +1,16 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import SegmentedControl from './SegmentedControl'
 import { LEVELS, type Level } from '../services/tutor'
+import { GOALS, MAX_PROFESSION, type Goal } from '../services/scenarios'
 import { SPEECH_RATES, setSpeechRate, ttsSupported, useSpeechRate } from '../services/speech'
 
 interface Props {
   level: Level
   onLevelChange: (level: Level) => void
+  goal: Goal
+  onGoalChange: (goal: Goal) => void
+  profession: string
+  onProfessionChange: (profession: string) => void
   blind: boolean
   onBlindChange: (blind: boolean) => void
   onClose: () => void
@@ -25,19 +30,38 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 }
 
 /** Painel de ajustes (bottom sheet no celular, cartão centralizado no desktop). */
-export default function SettingsModal({ level, onLevelChange, blind, onBlindChange, onClose }: Props) {
+export default function SettingsModal({
+  level,
+  onLevelChange,
+  goal,
+  onGoalChange,
+  profession,
+  onProfessionChange,
+  blind,
+  onBlindChange,
+  onClose,
+}: Props) {
   const rate = useSpeechRate()
+  const [job, setJob] = useState(profession)
+
+  /** Fechar também grava a profissão (o `blur` não dispara ao fechar com Esc ou pelo fundo). */
+  function close() {
+    if (job.trim() !== profession) onProfessionChange(job.trim())
+    onClose()
+  }
+  const closeRef = useRef(close)
+  closeRef.current = close
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [])
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-900/20 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-sm animate-in sm:items-center"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && close()}
     >
       <div
         role="dialog"
@@ -49,7 +73,7 @@ export default function SettingsModal({ level, onLevelChange, blind, onBlindChan
           <h2 id="settings-title" className="text-lg font-semibold tracking-tight">Ajustes</h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={close}
             className="-mr-2 min-h-11 rounded-full px-3 text-sm font-medium text-blue-500 transition-all duration-300 ease-out hover:bg-zinc-100 active:scale-95"
           >
             OK
@@ -58,6 +82,25 @@ export default function SettingsModal({ level, onLevelChange, blind, onBlindChan
 
         <Section title="Nível de fluência">
           <SegmentedControl label="Nível de fluência" options={LEVELS} value={level} onChange={onLevelChange} />
+        </Section>
+
+        <Section
+          title="Foco"
+          hint={goal === 'work' ? 'O tutor puxa a conversa e o vocabulário para a sua área.' : undefined}
+        >
+          <SegmentedControl label="Foco" options={GOALS} value={goal} onChange={onGoalChange} />
+          {goal === 'work' && (
+            <input
+              value={job}
+              onChange={(e) => setJob(e.target.value)}
+              // grava ao sair do campo: evita sincronizar o perfil a cada tecla
+              onBlur={() => onProfessionChange(job.trim())}
+              maxLength={MAX_PROFESSION}
+              aria-label="Sua profissão"
+              placeholder="Sua profissão (ex.: arquiteto de soluções)"
+              className="min-h-12 w-full rounded-2xl bg-zinc-100 px-4 text-base outline-none ring-1 ring-transparent transition-all duration-300 ease-out placeholder:text-zinc-400 focus:bg-white focus:ring-zinc-300"
+            />
+          )}
         </Section>
 
         {ttsSupported && (

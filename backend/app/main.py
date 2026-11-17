@@ -101,7 +101,13 @@ async def chat(
     # RAG: erros antigos deste aluno parecidos com a frase nova entram no prompt
     recall = await memory.recall(user.uid, last.content) if memory else Recall()
     messages = build_chat_messages(
-        body.level, body.messages, body.weak_spots, settings.max_history_messages, recall.mistakes
+        body.level,
+        body.messages,
+        body.weak_spots,
+        settings.max_history_messages,
+        recall.mistakes,
+        body.scenario,
+        body.profession,
     )
     raw = await llm.complete(messages, max_tokens=1024)
     reply = parse_tutor_reply(raw)

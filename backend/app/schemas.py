@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .scenarios import SCENARIOS
 from .tags import ERROR_TAGS, parse_tags
 
 Level = Literal["beginner", "intermediate", "advanced"]
@@ -22,6 +23,9 @@ ErrorTag = Literal[
 
 MAX_TEXT = 8000
 MAX_USER_MESSAGE = 2000
+MAX_SUGGESTION = 300
+MAX_SUGGESTIONS = 3
+MAX_PROFESSION = 80
 
 
 def normalize_score(value: Any) -> int | None:
@@ -56,11 +60,20 @@ class Feedback(BaseModel):
         return parse_tags(v)
 
 
+class Suggestion(BaseModel):
+    """Resposta que o aluno poderia dar (em inglês), com a tradução para o português."""
+
+    text: str = Field(min_length=1, max_length=MAX_SUGGESTION)
+    translation: str | None = Field(None, max_length=MAX_SUGGESTION)
+
+
 class Message(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(min_length=1, max_length=MAX_TEXT)
     feedback: Feedback | None = None
     translation: str | None = Field(None, max_length=MAX_TEXT)
+    # sugestões que acompanharam a mensagem do tutor (voltam para o modelo manter o padrão)
+    suggestions: list[Suggestion] = Field(default_factory=list, max_length=5)
 
 
 class WeakSpot(BaseModel):
@@ -74,12 +87,29 @@ class ChatRequest(BaseModel):
     level: Level
     messages: list[Message] = Field(min_length=1, max_length=400)
     weak_spots: list[WeakSpot] = Field(default_factory=list, max_length=10)
+    # id de um cenário de role-play (scenarios.py); ausente = conversa livre
+    scenario: str | None = Field(None, max_length=40)
+    # profissão do aluno, quando o foco dele é inglês para o trabalho
+    profession: str | None = Field(None, max_length=MAX_PROFESSION)
+
+    @field_validator("scenario", mode="after")
+    @classmethod
+    def _scenario(cls, v: str | None) -> str | None:
+        # id desconhecido (app mais novo que o servidor): segue como conversa livre
+        return v if v in SCENARIOS else None
+
+    @field_validator("profession", mode="after")
+    @classmethod
+    def _profession(cls, v: str | None) -> str | None:
+        return " ".join(v.split()) or None if v else None
 
 
 class TutorReply(BaseModel):
     reply: str
     feedback: Feedback | None
     translation: str | None
+    # respostas possíveis para o aluno tocar e adaptar (vazio no nível avançado)
+    suggestions: list[Suggestion] = []
 
 
 class TranslateRequest(BaseModel):

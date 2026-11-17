@@ -5,6 +5,8 @@ import { useSpeechRecognition } from '../services/speech'
 interface Props {
   disabled?: boolean
   onSend: (text: string) => void
+  /** frase a colocar no campo (sugestão tocada); `n` muda a cada toque, mesmo com o texto igual */
+  draft?: { text: string; n: number } | null
 }
 
 // Pressionar por mais que isso = modo "segurar para falar"; menos = toque liga/desliga.
@@ -12,7 +14,7 @@ const HOLD_MS = 350
 // Atrasos das barras do indicador, para a onda não subir toda junta.
 const BAR_DELAYS = [0, 180, 90, 270, 45]
 
-export default function ChatInput({ disabled, onSend }: Props) {
+export default function ChatInput({ disabled, onSend, draft }: Props) {
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
   const baseText = useRef('') // texto que já estava no input antes de começar a falar
@@ -21,6 +23,16 @@ export default function ChatInput({ disabled, onSend }: Props) {
 
   // a fala é costurada ao que já estava digitado (maiúscula só depois de . ! ?)
   const mic = useSpeechRecognition((spoken) => setText(appendTranscript(baseText.current, spoken)))
+
+  // sugestão tocada: substitui o rascunho, para o aluno ler, adaptar e enviar
+  const stopMic = mic.stop
+  useEffect(() => {
+    if (!draft) return
+    stopMic()
+    setText(draft.text)
+    // com teclado físico o cursor já vai para o campo; no celular o teclado não sobe sozinho
+    if (window.matchMedia('(pointer: fine)').matches) ref.current?.focus()
+  }, [draft, stopMic])
 
   const canSend = text.trim().length > 0 && !disabled
 

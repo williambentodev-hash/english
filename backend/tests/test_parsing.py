@@ -76,6 +76,34 @@ def test_blank_translation_becomes_none():
     assert parse_tutor_reply(tutor(reply="Hi", translation="  ")).translation is None
 
 
+def test_suggestions_are_cleaned_and_limited():
+    raw = json.dumps(
+        {
+            "reply": "What do you do?",
+            "suggestions": [
+                {"text": " I am an architect. ", "translation": "Sou arquiteto."},
+                "I work with cloud.",
+                {"text": "I am an architect."},
+                {"translation": "sem texto"},
+                42,
+                {"text": "x" * 301},
+                {"text": "I design systems.", "translation": "  "},
+                {"text": "One too many."},
+            ],
+        }
+    )
+    assert [s.model_dump() for s in parse_tutor_reply(raw).suggestions] == [
+        {"text": "I am an architect.", "translation": "Sou arquiteto."},
+        {"text": "I work with cloud.", "translation": None},
+        {"text": "I design systems.", "translation": None},
+    ]
+
+
+def test_missing_or_invalid_suggestions_become_empty():
+    assert parse_tutor_reply(tutor()).suggestions == []
+    assert parse_tutor_reply(json.dumps({"reply": "Hi", "suggestions": "none"})).suggestions == []
+
+
 def test_term_translation():
     t = parse_term_translation('{"translation":" foi ","base":"go"}', "went")
     assert (t.translation, t.base) == ("foi", "go")

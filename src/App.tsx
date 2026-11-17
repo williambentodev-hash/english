@@ -8,7 +8,11 @@ import MessageBubble, { TypingIndicator } from './components/MessageBubble'
 import ProgressDashboard, { type DashboardTab } from './components/ProgressDashboard'
 import WordPopover, { type TermSelection } from './components/WordPopover'
 import { isLevel, sendMessage, type ChatMessage, type Level } from './services/tutor'
-import { isBoolean, useMediaQuery, usePersistentState } from './services/prefs'
+import OnboardingModal from './components/OnboardingModal'
+import ScenarioPicker from './components/ScenarioPicker'
+import Suggestions from './components/Suggestions'
+import { FREE, getScenario, isGoal, type Goal } from './services/scenarios'
+import { isBoolean, isString, useMediaQuery, usePersistentState } from './services/prefs'
 import { ttsSupported, useSpeechRate } from './services/speech'
 import { useAuth } from './services/auth'
 import { useProfileSync } from './services/profileSync'
@@ -16,19 +20,16 @@ import { newSessionId, recordPhrase, usePendingSync, useWeakSpots } from './serv
 import { chatTitle, deleteChat, endChat, loadChat, useChatHistory, type ChatTurn } from './services/history'
 import { termId, useVocabulary } from './services/vocabulary'
 
-const GREETING_TEXT = "Hi there! 👋 I'm your English tutor. How was your day today?"
-const GREETING_TRANSLATION = 'Olá! 👋 Eu sou seu professor de inglês. Como foi o seu dia hoje?'
 
 // botão de ícone do header: alvo de toque de 44px, sem quebra de linha
 const iconBtn =
   'flex h-11 w-11 shrink-0 items-center justify-center whitespace-nowrap rounded-full transition-all duration-300 ease-out hover:bg-zinc-100 active:scale-95'
 
-const greeting = (blind: boolean): ChatMessage => ({
-  role: 'assistant',
-  content: GREETING_TEXT,
-  translation: GREETING_TRANSLATION,
-  hidden: blind,
-})
+/** Primeira fala do tutor: a abertura do cenário, com as primeiras ideias de resposta. */
+const greeting = (blind: boolean, scenarioId: string = FREE): ChatMessage => {
+  const s = getScenario(scenarioId)
+  return { role: 'assistant', content: s.opening, translation: s.openingTranslation, suggestions: s.starters, hidden: blind }
+}
 
 /** Mensagens da tela a partir do histórico salvo (texto sempre visível). */
 const fromTurns = (turns: ChatTurn[]): ChatMessage[] => [
@@ -68,11 +69,24 @@ export default function App() {
   // pedido em andamento ao tutor: cancelado ao trocar de conversa
   const inflight = useRef<AbortController | null>(null)
   const { chats, error: historyError } = useChatHistory(uid)
-  const [level, setLevel] = usePersistentState<Level>('tutor_level', 'intermediate', isLevel)
+  const [level, setLevel] = usePersistentState<Level>('tutor_level', 'beginner', isLevel)
   const [blindPref, setBlind] = usePersistentState('tutor_blind_listening', false, isBoolean)
   const blind = blindPref && ttsSupported
   const speechRate = useSpeechRate()
-  useProfileSync(user, { level, blindListening: blindPref, speechRate }, { setLevel, setBlind })
+  // foco do aluno (trabalho ou dia a dia) e profissão: escolhidos nas boas-vindas, mudam em Ajustes
+  const [goal, setGoal] = usePersistentState<Goal>('tutor_goal', 'general', isGoal)
+  const [profession, setProfession] = usePersistentState('tutor_profession', '', isString)
+  const [onboarded, setOnboarded] = usePersistentState('tutor_onboarded', false, isBoolean)
+  useProfileSync(
+    user,
+    { level, blindListening: blindPref, speechRate, goal, profession, onboarded },
+    { setLevel, setBlind, setGoal, setProfession, setOnboarded },
+  )
+  // cenário da conversa atual (role-play); escolhido antes da primeira frase
+  const [scenario, setScenario] = useState(FREE)
+  // frase levada ao campo de texto por uma sugestão tocada
+  const [draft, setDraft] = useState<{ text: string; n: number } | null>(null)
+  const fillInput = useCallback((text: string) => setDraft((d) => ({ text, n: (d?.n ?? 0) + 1 })), [])
   const [messages, setMessages] = useState<ChatMessage[]>(() => [greeting(blind)])
   const [session, setSession] = useState(0) // remonta as bolhas a cada nova conversa
   const [loading, setLoading] = useState(false)
@@ -89,12 +103,40 @@ export default function App() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages, loading, error])
 
+  const started = messages.some((m) => m.role === 'user')
+  const lastMessage = messages[messages.length - 1]
+  // ideias de resposta para a última fala do tutor (no modo escuta, só depois de revelar o texto)
+  const suggestions =
+    !loading && level !== 'advanced' && lastMessage?.role === 'assistant' && !lastMessage.hidden
+      ? (lastMessage.suggestions ?? [])
+      : []
+
+  /** Troca a situação da conversa enquanto ela ainda não começou: muda a fala de abertura. */
+  function pickScenario(id: string) {
+    if (started || id === scenario) return
+    setScenario(id)
+    setMessages([greeting(blind, id)])
+    setSession((s) => s + 1)
+    setTermSel(null)
+  }
+
+  function finishOnboarding(choice: { level: Level; goal: Goal; profession: string }) {
+    setLevel(choice.level)
+    setGoal(choice.goal)
+    setProfession(choice.profession)
+    setOnboarded(true)
+    // quem veio pelo trabalho já começa numa situação de trabalho
+    if (choice.goal === 'work') pickScenario('work_intro')
+  }
+
   /** Encerra a sessão atual (se teve alguma frase) e mostra `next` com o id `id`. */
   function switchSession(id: string, next: ChatMessage[], end = true) {
     inflight.current?.abort()
-    if (end && id !== sessionId.current && messages.some((m) => m.role === 'user')) endChat(uid, sessionId.current)
+    if (end && id !== sessionId.current && started) endChat(uid, sessionId.current)
     sessionId.current = id
     setCurrentChat(id)
+    // conversas novas e reabertas seguem como conversa livre (o cenário não fica salvo no histórico)
+    setScenario(FREE)
     setMessages(next)
     setSession((s) => s + 1)
     setTermSel(null)
@@ -145,7 +187,7 @@ export default function App() {
 
   async function handleSend(text: string) {
     const sid = sessionId.current
-    const first = !messages.some((m) => m.role === 'user')
+    const first = !started
     const ctrl = new AbortController()
     inflight.current = ctrl
     // responder revela o texto que estava oculto no modo escuta
@@ -159,9 +201,18 @@ export default function App() {
     try {
       // A API exige que a conversa comece com "user": a saudação local é omitida.
       const history = next[0].role === 'assistant' ? next.slice(1) : next
-      const { reply, feedback, translation } = await sendMessage(history, level, weakSpots, ctrl.signal)
+      const { reply, feedback, translation, suggestions } = await sendMessage(
+        history,
+        {
+          level,
+          weakSpots,
+          scenario: scenario === FREE ? null : scenario,
+          profession: goal === 'work' ? profession : null,
+        },
+        ctrl.signal,
+      )
       if (ctrl.signal.aborted) return
-      setMessages((m) => [...m, { role: 'assistant', content: reply, feedback, translation, hidden: blind }])
+      setMessages((m) => [...m, { role: 'assistant', content: reply, feedback, translation, suggestions, hidden: blind }])
       void recordPhrase(uid, {
         sessionId: sid,
         level,
@@ -273,6 +324,7 @@ export default function App() {
             🎧 Modo escuta: as respostas chegam só em áudio. Responda para ver o texto.
           </p>
         )}
+        {!started && <ScenarioPicker goal={goal} value={scenario} onChange={pickScenario} />}
         {messages.map((m, i) => (
           <MessageBubble
             key={`${session}-${i}`}
@@ -282,8 +334,10 @@ export default function App() {
             onSelectTerm={setTermSel}
             active={termSel}
             savedIds={savedIds}
+            onUseText={fillInput}
           />
         ))}
+        <Suggestions suggestions={suggestions} onPick={fillInput} />
         {loading && <TypingIndicator />}
         {error && (
           <div className="mx-auto w-fit max-w-[90%] rounded-2xl bg-red-50 px-4 py-2 text-center text-sm text-red-600 ring-1 ring-red-100 animate-in">
@@ -293,7 +347,7 @@ export default function App() {
         <div ref={bottomRef} />
       </main>
 
-      <ChatInput disabled={loading} onSend={handleSend} />
+      <ChatInput disabled={loading} onSend={handleSend} draft={draft} />
       </div>
 
       {termSel && (
@@ -314,6 +368,10 @@ export default function App() {
         <SettingsModal
           level={level}
           onLevelChange={setLevel}
+          goal={goal}
+          onGoalChange={setGoal}
+          profession={profession}
+          onProfessionChange={setProfession}
           blind={blind}
           onBlindChange={setBlind}
           onClose={() => setShowSettings(false)}
@@ -321,6 +379,8 @@ export default function App() {
       )}
 
       {showAccount && <AuthModal user={user} onClose={() => setShowAccount(false)} />}
+
+      {!onboarded && <OnboardingModal level={level} goal={goal} profession={profession} onDone={finishOnboarding} />}
     </div>
   )
 }

@@ -2,7 +2,16 @@
 import json
 from typing import Any
 
-from .schemas import CheckResult, Feedback, TermTranslation, TutorReply, normalize_score
+from .schemas import (
+    MAX_SUGGESTION,
+    MAX_SUGGESTIONS,
+    CheckResult,
+    Feedback,
+    Suggestion,
+    TermTranslation,
+    TutorReply,
+    normalize_score,
+)
 from .tags import parse_tags
 
 
@@ -40,7 +49,30 @@ def parse_tutor_reply(raw: str) -> TutorReply:
             tags=parse_tags(f.get("tags")) if correction else [],
             native=native,
         )
-    return TutorReply(reply=reply, feedback=feedback, translation=_text(data.get("translation")))
+    return TutorReply(
+        reply=reply,
+        feedback=feedback,
+        translation=_text(data.get("translation")),
+        suggestions=_suggestions(data.get("suggestions")),
+    )
+
+
+def _suggestions(value: Any) -> list[Suggestion]:
+    """Sugestões de resposta: aceita objetos {text, translation} ou só o texto; descarta o resto."""
+    if not isinstance(value, list):
+        return []
+    out: list[Suggestion] = []
+    for item in value:
+        if isinstance(item, dict):
+            text, translation = _text(item.get("text")), _text(item.get("translation"))
+        else:
+            text, translation = _text(item), None
+        if not text or len(text) > MAX_SUGGESTION or any(s.text == text for s in out):
+            continue
+        if translation and len(translation) > MAX_SUGGESTION:
+            translation = None
+        out.append(Suggestion(text=text, translation=translation))
+    return out[:MAX_SUGGESTIONS]
 
 
 def parse_term_translation(raw: str, term: str) -> TermTranslation:
