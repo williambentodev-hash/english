@@ -24,6 +24,7 @@ export function usePersistentState<T>(key: string, initial: T, isValid: (v: unkn
 }
 
 export const isBoolean = (v: unknown): v is boolean => typeof v === 'boolean'
+export const isString = (v: unknown): v is string => typeof v === 'string'
 
 /** true enquanto a media query casar (atualiza ao redimensionar/girar a tela). */
 export function useMediaQuery(query: string) {

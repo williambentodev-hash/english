@@ -76,6 +76,7 @@ def test_chat_returns_parsed_reply(client, llm):
         },
         "reply": "Nice! Who did you go with?",
         "translation": "Legal! Com quem você foi?",
+        "suggestions": [],
     }
     messages, max_tokens = llm.calls[0]
     assert messages[0]["role"] == "system"
@@ -110,7 +111,20 @@ def test_chat_accepts_history_as_the_front_sends_it(client, llm):
 def test_chat_model_out_of_format_still_answers(client, llm):
     llm.response = "Sorry, something went wrong on my side."
     res = client.post("/api/chat", json=CHAT)
-    assert res.json() == {"reply": llm.response, "feedback": None, "translation": None}
+    assert res.json() == {"reply": llm.response, "feedback": None, "translation": None, "suggestions": []}
+
+
+def test_chat_scenario_and_profession_reach_the_prompt(client, llm):
+    body = {**CHAT, "scenario": "work_standup", "profession": "  Arquiteto de   soluções "}
+    assert client.post("/api/chat", json=body).status_code == 200
+    system = llm.calls[0][0][0]["content"]
+    assert "daily stand-up" in system
+    assert '"Arquiteto de soluções"' in system
+
+
+def test_chat_ignores_unknown_scenario(client, llm):
+    assert client.post("/api/chat", json={**CHAT, "scenario": "made_up"}).status_code == 200
+    assert "CURRENT SCENARIO" not in llm.calls[0][0][0]["content"]
 
 
 @pytest.mark.parametrize(

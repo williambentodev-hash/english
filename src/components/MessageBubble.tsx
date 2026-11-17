@@ -207,7 +207,17 @@ function Section({ label, accent, children }: { label: string; accent: string; c
   )
 }
 
-function FeedbackCard({ feedback, source, vocab }: { feedback: Feedback; source: string; vocab: VocabProps }) {
+function FeedbackCard({
+  feedback,
+  source,
+  vocab,
+  onUseText,
+}: {
+  feedback: Feedback
+  source: string
+  vocab: VocabProps
+  onUseText?: (text: string) => void
+}) {
   const { score, correction, native } = feedback
   const tone = score != null ? scoreTone(score) : null
 
@@ -224,7 +234,7 @@ function FeedbackCard({ feedback, source, vocab }: { feedback: Feedback; source:
           </span>
         </div>
       ) : (
-        <p className="text-xs font-medium text-zinc-500">Tente escrever em inglês 🙂</p>
+        <p className="text-xs font-medium text-zinc-500">Em inglês fica assim. Agora tente você 🙂</p>
       )}
 
       {correction && (
@@ -236,6 +246,16 @@ function FeedbackCard({ feedback, source, vocab }: { feedback: Feedback; source:
           <span className="pt-1.5">“<SelectableText text={native} source={source} {...vocab} />”</span>
           {ttsSupported && <ListenButton text={native} small />}
         </div>
+        {/* escreveu em português: leva a frase em inglês para o campo, para repetir e enviar */}
+        {score == null && onUseText && (
+          <button
+            type="button"
+            onClick={() => onUseText(native)}
+            className="mt-1 flex min-h-8 items-center rounded-full bg-blue-50 px-3 text-xs font-medium text-blue-600 transition-all duration-300 ease-out hover:bg-blue-100 active:scale-95"
+          >
+            Usar esta frase
+          </button>
+        )}
       </Section>
     </div>
   )
@@ -274,6 +294,8 @@ interface Props extends VocabProps {
   onReveal?: () => void
   /** id estável da mensagem (origem do termo selecionado) */
   messageKey: string
+  /** coloca uma frase em inglês no campo de texto */
+  onUseText?: (text: string) => void
 }
 
 export default function MessageBubble({ message, onReveal, ...rest }: Props) {
@@ -290,13 +312,15 @@ export default function MessageBubble({ message, onReveal, ...rest }: Props) {
   return <TutorBubble message={message} onReveal={onReveal} {...rest} />
 }
 
-function TutorBubble({ message, onReveal, messageKey, ...vocab }: Props) {
+function TutorBubble({ message, onReveal, messageKey, onUseText, ...vocab }: Props) {
   const [translated, setTranslated] = useState(false)
   const canTranslate = !message.hidden && !!message.translation
 
   return (
     <div className="flex flex-col items-start gap-1.5 animate-in">
-      {message.feedback && <FeedbackCard feedback={message.feedback} source={`${messageKey}-native`} vocab={vocab} />}
+      {message.feedback && (
+        <FeedbackCard feedback={message.feedback} source={`${messageKey}-native`} vocab={vocab} onUseText={onUseText} />
+      )}
       <div className="flex w-full items-end gap-1">
         <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-3xl rounded-bl-lg bg-white px-4 py-2.5 text-[15px] leading-relaxed text-zinc-900 shadow-sm ring-1 ring-zinc-900/5 sm:max-w-[70%]">
           {message.hidden ? (

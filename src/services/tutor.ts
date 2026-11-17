@@ -74,12 +74,22 @@ export interface Feedback {
   native: string
 }
 
+/** Resposta que o aluno poderia dar: ele toca, adapta e envia. */
+export interface Suggestion {
+  /** em inglês */
+  text: string
+  /** tradução para o português */
+  translation: string | null
+}
+
 export interface ChatMessage {
   role: Role
   content: string
   feedback?: Feedback | null
   /** tradução para o português (só mensagens do tutor) */
   translation?: string | null
+  /** ideias de resposta para a mensagem do tutor (vazio no nível avançado) */
+  suggestions?: Suggestion[]
   /** modo escuta: texto oculto até o aluno responder ou revelar */
   hidden?: boolean
 }
@@ -88,6 +98,19 @@ export interface TutorReply {
   reply: string
   feedback: Feedback | null
   translation: string | null
+  /** ausente em servidores anteriores às sugestões */
+  suggestions?: Suggestion[]
+}
+
+/** O que o tutor precisa saber sobre o aluno e a conversa além das mensagens. */
+export interface ChatContext {
+  level: Level
+  /** erros recorrentes do aluno: o tutor puxa a prática para eles e avisa quando se repetem */
+  weakSpots?: WeakSpot[]
+  /** id do cenário de role-play (ausente = conversa livre) */
+  scenario?: string | null
+  /** profissão do aluno, quando o foco é inglês para o trabalho */
+  profession?: string | null
 }
 
 export class AIError extends Error {
@@ -134,9 +157,7 @@ async function callBackend<T>(path: string, body?: unknown, signal?: AbortSignal
 
 export function sendMessage(
   history: ChatMessage[],
-  level: Level,
-  /** erros recorrentes do aluno: o tutor puxa a prática para eles e avisa quando se repetem */
-  weakSpots: WeakSpot[] = [],
+  { level, weakSpots = [], scenario, profession }: ChatContext,
   signal?: AbortSignal,
 ): Promise<TutorReply> {
   return callBackend<TutorReply>(
@@ -144,11 +165,15 @@ export function sendMessage(
     {
       level,
       weak_spots: weakSpots,
-      messages: history.map(({ role, content, feedback, translation }) => ({
+      scenario: scenario || null,
+      profession: profession?.trim() || null,
+      messages: history.map(({ role, content, feedback, translation, suggestions }) => ({
         role,
         content,
         feedback: feedback ?? null,
         translation: translation ?? null,
+        // só nas mensagens do tutor: o modelo vê o próprio padrão e continua sugerindo
+        ...(role === 'assistant' && suggestions?.length ? { suggestions } : {}),
       })),
     },
     signal,

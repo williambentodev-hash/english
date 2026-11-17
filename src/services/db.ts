@@ -29,6 +29,7 @@ import {
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { isLevel, parseTags, type Feedback, type Level } from './tutor'
+import { isGoal, MAX_PROFESSION, type Goal } from './scenarios'
 import type { CorrectionEntry, SessionStat, Stats } from './stats'
 
 const MAX_SESSIONS = 200
@@ -45,6 +46,12 @@ export interface UserProfile {
   level: Level
   blindListening: boolean
   speechRate: number
+  /** foco do aluno: inglês para o trabalho ou para o dia a dia */
+  goal: Goal
+  /** profissão (texto livre), usada quando o foco é trabalho */
+  profession: string
+  /** já passou pela tela de boas-vindas (nível e foco escolhidos) */
+  onboarded: boolean
 }
 
 export async function loadUserProfile(uid: string): Promise<Partial<UserProfile> | null> {
@@ -55,6 +62,9 @@ export async function loadUserProfile(uid: string): Promise<Partial<UserProfile>
   if (isLevel(d.level)) out.level = d.level
   if (typeof d.blindListening === 'boolean') out.blindListening = d.blindListening
   if (typeof d.speechRate === 'number') out.speechRate = d.speechRate
+  if (isGoal(d.goal)) out.goal = d.goal
+  if (typeof d.profession === 'string') out.profession = d.profession.slice(0, MAX_PROFESSION)
+  if (typeof d.onboarded === 'boolean') out.onboarded = d.onboarded
   return out
 }
 

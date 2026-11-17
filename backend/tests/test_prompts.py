@@ -22,6 +22,42 @@ def test_system_prompt_lists_weak_spots():
     assert prompt.index("- article:") < prompt.index("- plural:")
 
 
+def test_system_prompt_suggestions_follow_the_level():
+    assert "Exactly 3 items" in build_system_prompt("beginner")
+    assert "Exactly 2 items" in build_system_prompt("intermediate")
+    assert "Always []" in build_system_prompt("advanced")
+
+
+def test_system_prompt_work_focus_and_scenario():
+    plain = build_system_prompt("beginner")
+    assert "ENGLISH FOR WORK" not in plain
+    assert "CURRENT SCENARIO" not in plain
+
+    prompt = build_system_prompt(
+        "beginner", scenario="work_standup", profession='Arquiteto de\nsoluções "sênior"'
+    )
+    # profissão vira uma linha só, sem aspas que fechem a citação
+    assert "\"Arquiteto de soluções 'sênior'\"" in prompt
+    assert "daily stand-up" in prompt
+    assert "${" not in prompt
+    # cenário desconhecido é ignorado
+    assert "CURRENT SCENARIO" not in build_system_prompt("beginner", scenario="made_up")
+
+
+def test_suggestions_go_back_to_the_model_only_when_present():
+    history = [
+        Message(role="user", content="Hi"),
+        Message(
+            role="assistant",
+            content="How are you?",
+            suggestions=[{"text": "I am fine.", "translation": "Estou bem."}],
+        ),
+        Message(role="user", content="I am fine."),
+    ]
+    assistant = build_chat_messages("beginner", history, [], max_history=30)[2]
+    assert json.loads(assistant["content"])["suggestions"] == [{"text": "I am fine.", "translation": "Estou bem."}]
+
+
 def test_assistant_messages_go_back_as_json():
     history = [
         Message(role="user", content="I go yesterday"),
