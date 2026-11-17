@@ -7,10 +7,12 @@ import {
   deleteVocabRemote,
   saveVocabRemote,
   setVocabLearnedRemote,
+  setVocabReviewRemote,
   subscribeVocabRemote,
   toVocabEntry,
   type VocabEntry,
 } from './db'
+import { isDue, type ReviewState } from '../lib/srs'
 
 export type { VocabEntry }
 
@@ -83,6 +85,8 @@ export interface NewTerm {
   /** ao restaurar um termo removido ("Desfazer") */
   date?: string
   learned?: boolean
+  box?: number
+  due?: string | null
 }
 
 export async function saveTerm(uid: string | null, t: NewTerm) {
@@ -96,6 +100,9 @@ export async function saveTerm(uid: string | null, t: NewTerm) {
     context: t.context.slice(0, 1000),
     date: t.date ?? new Date().toISOString(),
     learned: t.learned ?? false,
+    // nova: entra na revisão já hoje; restaurada ("Desfazer"): mantém onde estava
+    box: t.box ?? 0,
+    due: t.due ?? null,
   }
   if (useCloud(uid)) return void (await saveVocabRemote(uid, entry))
   writeLocal([entry, ...loadLocal().filter((e) => e.id !== entry.id)])
@@ -104,6 +111,19 @@ export async function saveTerm(uid: string | null, t: NewTerm) {
 export async function setLearned(uid: string | null, id: string, learned: boolean) {
   if (useCloud(uid)) return void (await setVocabLearnedRemote(uid, id, learned))
   writeLocal(loadLocal().map((e) => (e.id === id ? { ...e, learned } : e)))
+}
+
+/** Grava o resultado de uma revisão (caixa, próxima data e se ficou aprendida). */
+export async function recordReview(uid: string | null, id: string, review: ReviewState) {
+  if (useCloud(uid)) return void (await setVocabReviewRemote(uid, id, review))
+  writeLocal(loadLocal().map((e) => (e.id === id ? { ...e, ...review } : e)))
+}
+
+/** Palavras com revisão pendente agora (as que estão há mais tempo esperando primeiro). */
+export function dueWords(entries: VocabEntry[] | null, now = Date.now()) {
+  return (entries ?? [])
+    .filter((e) => isDue(e, now))
+    .sort((a, b) => (a.due ?? a.date).localeCompare(b.due ?? b.date))
 }
 
 export async function removeTerm(uid: string | null, id: string) {

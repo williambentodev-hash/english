@@ -18,7 +18,8 @@ import { useAuth } from './services/auth'
 import { useProfileSync } from './services/profileSync'
 import { newSessionId, recordPhrase, usePendingSync, useWeakSpots } from './services/stats'
 import { chatTitle, deleteChat, endChat, loadChat, useChatHistory, type ChatTurn } from './services/history'
-import { termId, useVocabulary } from './services/vocabulary'
+import { dueWords, termId, useVocabulary } from './services/vocabulary'
+import ReviewPanel from './components/ReviewPanel'
 
 
 // botão de ícone do header: alvo de toque de 44px, sem quebra de linha
@@ -98,6 +99,14 @@ export default function App() {
   const { entries: vocab } = useVocabulary(uid)
   const savedVocab = useMemo(() => new Map((vocab ?? []).map((v) => [v.id, v])), [vocab])
   const savedIds = useMemo(() => new Set(savedVocab.keys()), [savedVocab])
+  // revisão espaçada: palavras pendentes hoje (contador na sidebar e lembrete no início da conversa)
+  const [showReview, setShowReview] = useState(false)
+  const reviewDue = useMemo(() => dueWords(vocab).length, [vocab])
+  const openReview = () => {
+    closeDrawer()
+    setProgressTab(null)
+    setShowReview(true)
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -258,6 +267,8 @@ export default function App() {
           closeDrawer()
           setShowExercises(true)
         }}
+        onOpenReview={openReview}
+        reviewDue={reviewDue}
         cloud={cloud}
         authReady={authReady}
         user={user}
@@ -324,6 +335,22 @@ export default function App() {
             🎧 Modo escuta: as respostas chegam só em áudio. Responda para ver o texto.
           </p>
         )}
+        {!started && reviewDue > 0 && (
+          <button
+            type="button"
+            onClick={openReview}
+            className="flex min-h-12 w-full items-center gap-3 rounded-2xl bg-white px-4 text-left shadow-sm ring-1 ring-zinc-900/5 transition-all duration-300 ease-out hover:bg-zinc-50 active:scale-[0.99] animate-in"
+          >
+            <span className="text-lg" aria-hidden>🧠</span>
+            <span className="min-w-0 flex-1 text-sm">
+              <span className="font-medium text-zinc-800">
+                {reviewDue} {reviewDue === 1 ? 'palavra para revisar' : 'palavras para revisar'} hoje
+              </span>
+              <span className="block text-xs text-zinc-500">Leva 2 minutos e fixa o que você já viu</span>
+            </span>
+            <span className="text-sm font-semibold text-blue-500">Revisar</span>
+          </button>
+        )}
         {!started && <ScenarioPicker goal={goal} value={scenario} onChange={pickScenario} />}
         {messages.map((m, i) => (
           <MessageBubble
@@ -360,7 +387,17 @@ export default function App() {
         />
       )}
 
-      {progressTab && <ProgressDashboard uid={uid} initialTab={progressTab} onClose={() => setProgressTab(null)} />}
+      {progressTab && (
+        <ProgressDashboard uid={uid} initialTab={progressTab} onClose={() => setProgressTab(null)} onReview={openReview} />
+      )}
+
+      {showReview && (
+        <ReviewPanel
+          uid={uid}
+          onClose={() => setShowReview(false)}
+          onStartChat={() => setShowReview(false)}
+        />
+      )}
 
       {showExercises && <ExercisesPanel level={level} weakSpots={weakSpots} onClose={() => setShowExercises(false)} />}
 
