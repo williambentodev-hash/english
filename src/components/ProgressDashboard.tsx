@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { errorTagLabel, LEVELS, type ErrorTag, type Level, type WeakSpot } from '../services/tutor'
 import SegmentedControl from './SegmentedControl'
 import VocabularyList from './VocabularyList'
+import SkillProgress from './SkillProgress'
+import type { HabitView, Skill } from '../services/habit'
 import {
   countErrorTags,
   resetStats,
@@ -254,23 +256,28 @@ function SyncStatus({ view, cloudUser }: { view: StatsView; cloudUser: boolean }
 
 const NO_STATS: Stats = { sessions: [], corrections: [] }
 
-export type DashboardTab = 'progress' | 'vocabulary'
+export type DashboardTab = 'skills' | 'progress' | 'vocabulary'
 
 const TABS = [
-  { id: 'progress', label: 'Evolução' },
+  { id: 'skills', label: 'Habilidades' },
+  { id: 'progress', label: 'Conversa' },
   { id: 'vocabulary', label: 'Vocabulário' },
 ] as const
 
 interface DashboardProps {
   uid: string | null
-  /** aba aberta ao entrar (Evolução ou Vocabulário) */
+  /** meta diária e registro de atividades por habilidade */
+  habit: HabitView
+  /** abre a atividade de cada habilidade (fecha o painel) */
+  practice: Partial<Record<Skill, () => void>>
+  /** aba aberta ao entrar */
   initialTab?: DashboardTab
   onClose: () => void
   /** abre a revisão espaçada do vocabulário */
   onReview?: () => void
 }
 
-export default function ProgressDashboard({ uid, initialTab = 'progress', onClose, onReview }: DashboardProps) {
+export default function ProgressDashboard({ uid, habit, practice, initialTab = 'skills', onClose, onReview }: DashboardProps) {
   const [tab, setTab] = useState<DashboardTab>(initialTab)
   const [view, setView] = useState<StatsView | null>(null)
   const [busy, setBusy] = useState(false)
@@ -370,6 +377,8 @@ export default function ProgressDashboard({ uid, initialTab = 'progress', onClos
       <div className="mx-auto max-w-2xl space-y-3 px-4 pt-4 pb-[calc(2rem+env(safe-area-inset-bottom))]">
         {tab === 'vocabulary' ? (
           <VocabularyList uid={uid} onReview={onReview} />
+        ) : tab === 'skills' ? (
+          <SkillProgress view={habit} actions={practice} />
         ) : (
         <>
         {view && <SyncStatus view={view} cloudUser={!!uid} />}
@@ -381,7 +390,7 @@ export default function ProgressDashboard({ uid, initialTab = 'progress', onClos
         ) : empty ? (
           <div className="flex flex-col items-center px-6 pt-20 text-center">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-2xl shadow-sm ring-1 ring-zinc-900/5">📈</div>
-            <p className="mt-4 text-[15px] font-semibold">Nenhuma frase ainda</p>
+            <p className="mt-4 text-[15px] font-semibold">Nenhuma conversa ainda</p>
             <p className="mt-1 max-w-xs text-sm leading-relaxed text-zinc-500">
               Converse com o tutor e sua evolução aparece aqui: pontuação, frases praticadas e correções para revisar.
             </p>

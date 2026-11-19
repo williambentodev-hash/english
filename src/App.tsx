@@ -431,7 +431,26 @@ export default function App() {
       )}
 
       {progressTab && (
-        <ProgressDashboard uid={uid} initialTab={progressTab} onClose={() => setProgressTab(null)} onReview={openReview} />
+        <ProgressDashboard
+          uid={uid}
+          habit={habit}
+          practice={{
+            write: () => {
+              setProgressTab(null)
+              setShowExercises(true)
+            },
+            // fala: volta para a conversa (microfone)
+            speak: () => setProgressTab(null),
+            listen: () => {
+              setProgressTab(null)
+              openDictation()
+            },
+            vocab: openReview,
+          }}
+          initialTab={progressTab}
+          onClose={() => setProgressTab(null)}
+          onReview={openReview}
+        />
       )}
 
       {showDictation && <DictationPanel uid={uid} goal={goal} onClose={() => setShowDictation(false)} />}

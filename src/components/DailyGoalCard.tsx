@@ -16,78 +16,71 @@ export function StreakFlame({ days, lit, className = '' }: { days: number; lit: 
   )
 }
 
-/** Meta de hoje na tela inicial: uma barra por habilidade e a ofensiva. */
+/** Anel de progresso pequeno com o emoji da habilidade no centro. */
+function Ring({ pct, met, emoji }: { pct: number; met: boolean; emoji: string }) {
+  const r = 15
+  const c = 2 * Math.PI * r
+  return (
+    <span className="relative flex h-9 w-9 items-center justify-center">
+      <svg viewBox="0 0 36 36" className="absolute inset-0 -rotate-90" aria-hidden>
+        <circle cx="18" cy="18" r={r} fill="none" strokeWidth="3" className="stroke-zinc-100" />
+        <circle
+          cx="18"
+          cy="18"
+          r={r}
+          fill="none"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={c * (1 - pct / 100)}
+          className={`transition-[stroke-dashoffset] duration-500 ease-out ${met ? 'stroke-emerald-500' : 'stroke-blue-500'}`}
+        />
+      </svg>
+      <span className="text-[15px] leading-none" aria-hidden>{emoji}</span>
+    </span>
+  )
+}
+
+/** Meta de hoje na tela inicial: faixa compacta com um anel por habilidade. */
 export default function DailyGoalCard({ view, actions, onOpenStreak }: Props) {
   const { habit, today, streak } = view
   const skills = SKILLS.filter((s) => habit.goal[s.id] > 0)
   const doneCount = skills.filter((s) => skillMet(habit.goal, today, s.id)).length
 
   return (
-    <section aria-labelledby="goal-title" className="space-y-3 rounded-3xl bg-white p-4 shadow-sm ring-1 ring-zinc-900/5 animate-in">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 id="goal-title" className="text-[15px] font-semibold tracking-tight">
-            {streak.todayDone ? 'Meta de hoje cumprida! 🎉' : 'Meta de hoje'}
-          </h2>
-          <p className="text-xs text-zinc-500">
-            {streak.todayDone
-              ? 'Pode continuar praticando: tudo conta.'
-              : `${doneCount} de ${skills.length} ${skills.length === 1 ? 'habilidade' : 'habilidades'} · complete todas para manter a ofensiva`}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onOpenStreak}
-          aria-label={`Ofensiva de ${streak.current} ${streak.current === 1 ? 'dia' : 'dias'}. Ver detalhes e ajustar a meta`}
-          className="flex min-h-11 shrink-0 items-center gap-1 rounded-full bg-orange-50 px-3 text-[15px] ring-1 ring-orange-200/60 transition-all duration-300 ease-out hover:bg-orange-100 active:scale-95"
-        >
-          <StreakFlame days={streak.current} lit={streak.todayDone} />
-        </button>
-      </div>
-
-      <ul className="grid grid-cols-2 gap-2">
+    <section aria-labelledby="goal-title" className="flex items-center gap-2 rounded-2xl bg-white py-2 pr-2 pl-3.5 shadow-sm ring-1 ring-zinc-900/5 animate-in">
+      <button
+        type="button"
+        onClick={onOpenStreak}
+        className="min-w-0 flex-1 rounded-xl py-1 text-left transition-opacity duration-200 hover:opacity-70"
+        aria-label={`Meta de hoje: ${doneCount} de ${skills.length} habilidades. Ver detalhes e ajustar a meta`}
+      >
+        <h2 id="goal-title" className="truncate text-[13.5px] font-semibold tracking-tight">
+          {streak.todayDone ? 'Meta cumprida 🎉' : 'Meta de hoje'}
+        </h2>
+        <p className="truncate text-xs text-zinc-500 tabular-nums">
+          {doneCount}/{skills.length} {skills.length === 1 ? 'habilidade' : 'habilidades'} ›
+        </p>
+      </button>
+      <ul className="flex shrink-0 items-center gap-0.5">
         {skills.map((s) => {
           const target = habit.goal[s.id]
           const n = today[s.id] ?? 0
           const cleared = s.id === 'vocab' && isVocabCleared() && n < target
           const met = skillMet(habit.goal, today, s.id)
           const pct = met ? 100 : Math.min(100, (n / target) * 100)
-          const action = actions[s.id]
-          const body = (
-            <>
-              <span className="flex items-center justify-between gap-2">
-                <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-zinc-800">
-                  <span aria-hidden>{s.emoji}</span>
-                  <span className="truncate">{s.label}</span>
-                </span>
-                <span className={`text-xs tabular-nums ${met ? 'font-semibold text-emerald-600' : 'text-zinc-500'}`}>
-                  {met ? '✓' : `${n}/${target}`}
-                </span>
-              </span>
-              <span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-zinc-100" aria-hidden>
-                <span
-                  className={`block h-full rounded-full transition-[width] duration-500 ease-out ${met ? 'bg-emerald-500' : 'bg-blue-500'}`}
-                  style={{ width: `${pct}%` }}
-                />
-              </span>
-              <span className="mt-1.5 block text-[11px] leading-snug text-zinc-400">
-                {cleared ? 'Nada pendente para revisar hoje' : s.how}
-              </span>
-            </>
-          )
+          const label = `${s.label}: ${met ? 'cumprida' : `${n} de ${target}`}${cleared ? ' (nada pendente)' : ''}`
           return (
             <li key={s.id}>
-              {action ? (
-                <button
-                  type="button"
-                  onClick={action}
-                  className="block h-full w-full rounded-2xl bg-zinc-50 p-3 text-left ring-1 ring-zinc-900/5 transition-all duration-300 ease-out hover:bg-zinc-100 active:scale-[0.98]"
-                >
-                  {body}
-                </button>
-              ) : (
-                <div className="h-full rounded-2xl bg-zinc-50 p-3 ring-1 ring-zinc-900/5">{body}</div>
-              )}
+              <button
+                type="button"
+                onClick={actions[s.id] ?? onOpenStreak}
+                aria-label={label}
+                title={`${label} · ${s.how}`}
+                className="flex h-11 w-11 items-center justify-center rounded-full transition-all duration-200 ease-out hover:bg-zinc-50 active:scale-90"
+              >
+                <Ring pct={pct} met={met} emoji={s.emoji} />
+              </button>
             </li>
           )
         })}

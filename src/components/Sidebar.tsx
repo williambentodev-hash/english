@@ -84,6 +84,27 @@ function NavRow({ icon, label, onClick, badge }: { icon: ReactNode; label: strin
   )
 }
 
+/** Atalho de prática: atividade + habilidade que ela treina. */
+function PracticeTile({ emoji, label, skill, onClick, badge }: { emoji: string; label: string; skill: string; onClick: () => void; badge?: number }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${label} (${skill})${badge ? `, ${badge} pendentes` : ''}`}
+      className="relative flex flex-col items-center gap-0.5 rounded-2xl bg-white px-1 py-2.5 shadow-sm ring-1 ring-zinc-900/5 transition-all duration-200 ease-out hover:bg-zinc-50 active:scale-[0.97]"
+    >
+      <span className="text-xl leading-none" aria-hidden>{emoji}</span>
+      <span className="mt-1 text-[13px] font-medium text-zinc-800">{label}</span>
+      <span className="text-[11px] text-zinc-400">{skill}</span>
+      {!!badge && (
+        <span className="absolute -top-1.5 -right-1.5 min-w-5 rounded-full bg-blue-500 px-1.5 py-0.5 text-center text-[10px] font-semibold tabular-nums text-white" aria-hidden>
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
+    </button>
+  )
+}
+
 /** Nome/descrição da conta mostrados no rodapé. */
 function accountInfo(cloud: boolean, ready: boolean, user: User | null) {
   if (!cloud) return { name: 'Modo local', sub: 'Dados salvos neste navegador', initial: null, clickable: false }
@@ -95,7 +116,7 @@ function accountInfo(cloud: boolean, ready: boolean, user: User | null) {
 }
 
 /**
- * Menu lateral: nova conversa, histórico, progresso e conta/ajustes.
+ * Menu lateral: nova conversa, atalhos de prática, acompanhamento, histórico e conta/ajustes.
  * Desktop: coluna recolhível ao lado do chat. Celular: gaveta deslizante com fundo esmaecido
  * (Esc, toque fora ou arrastar para a esquerda fecham).
  */
@@ -198,10 +219,48 @@ export default function Sidebar(props: Props) {
           </button>
         </div>
 
-        {/* histórico (rolável) */}
-        <section aria-labelledby="sb-history" className="flex min-h-0 flex-1 flex-col">
-          <SectionTitle id="sb-history">Histórico</SectionTitle>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {/* meio (rolável): praticar, acompanhar e histórico */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {/* praticar: um atalho por habilidade (Fala e Escrita também são praticadas na conversa) */}
+          <section aria-labelledby="sb-practice" className="pb-3">
+            <SectionTitle id="sb-practice">Praticar</SectionTitle>
+            <div className="grid grid-cols-3 gap-2 px-3">
+              <PracticeTile emoji="🎧" label="Ditado" skill="Escuta" onClick={props.onOpenDictation} />
+              <PracticeTile emoji="✍️" label="Exercícios" skill="Escrita" onClick={props.onOpenExercises} />
+              <PracticeTile emoji="🧠" label="Revisão" skill="Vocabulário" onClick={props.onOpenReview} badge={props.reviewDue} />
+            </div>
+          </section>
+
+          {/* acompanhar */}
+          <section aria-labelledby="sb-progress" className="border-t border-zinc-900/5 pt-3 pb-2">
+            <SectionTitle id="sb-progress">Acompanhar</SectionTitle>
+            <div className="space-y-0.5 px-2">
+              <NavRow
+                label="Evolução"
+                onClick={() => props.onOpenProgress('skills')}
+                icon={
+                  <Icon className="h-4 w-4">
+                    <path d="M3 3v18h18" />
+                    <path d="m7 15 4-4 3 3 5-6" />
+                  </Icon>
+                }
+              />
+              <NavRow label="Meta diária e ofensiva" onClick={props.onOpenStreak} icon={<span className="text-sm leading-none">🔥</span>} />
+              <NavRow
+                label="Vocabulário salvo"
+                onClick={() => props.onOpenProgress('vocabulary')}
+                icon={
+                  <Icon className="h-4 w-4">
+                    <path d="M19 21 12 16l-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                  </Icon>
+                }
+              />
+            </div>
+          </section>
+
+          {/* histórico */}
+          <section aria-labelledby="sb-history" className="border-t border-zinc-900/5 pt-3">
+            <SectionTitle id="sb-history">Conversas</SectionTitle>
             <HistoryList
               chats={props.chats}
               error={props.historyError}
@@ -210,71 +269,8 @@ export default function Sidebar(props: Props) {
               onSelect={props.onSelectChat}
               onDelete={props.onDeleteChat}
             />
-          </div>
-        </section>
-
-        {/* progresso */}
-        <section aria-labelledby="sb-progress" className="shrink-0 border-t border-zinc-900/5 pt-3 pb-2">
-          <SectionTitle id="sb-progress">Progresso</SectionTitle>
-          <div className="space-y-0.5 px-2">
-            <NavRow
-              label="Meta diária e ofensiva"
-              onClick={props.onOpenStreak}
-              icon={<span className="text-sm leading-none">🔥</span>}
-            />
-            <NavRow
-              label="Revisar vocabulário"
-              onClick={props.onOpenReview}
-              badge={props.reviewDue}
-              icon={
-                <Icon className="h-4 w-4">
-                  <rect x="3" y="6" width="14" height="14" rx="2" />
-                  <path d="M7 3h12a2 2 0 0 1 2 2v12" />
-                </Icon>
-              }
-            />
-            <NavRow
-              label="Ditado (escuta)"
-              onClick={props.onOpenDictation}
-              icon={
-                <Icon className="h-4 w-4">
-                  <path d="M3 14v-2a9 9 0 0 1 18 0v2" />
-                  <rect x="3" y="14" width="4.5" height="6.5" rx="2" />
-                  <rect x="16.5" y="14" width="4.5" height="6.5" rx="2" />
-                </Icon>
-              }
-            />
-            <NavRow
-              label="Exercícios para você"
-              onClick={props.onOpenExercises}
-              icon={
-                <Icon className="h-4 w-4">
-                  <path d="M9 11l3 3 8-8" />
-                  <path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9" />
-                </Icon>
-              }
-            />
-            <NavRow
-              label="Evolução"
-              onClick={() => props.onOpenProgress('progress')}
-              icon={
-                <Icon className="h-4 w-4">
-                  <path d="M3 3v18h18" />
-                  <path d="m7 15 4-4 3 3 5-6" />
-                </Icon>
-              }
-            />
-            <NavRow
-              label="Vocabulário salvo"
-              onClick={() => props.onOpenProgress('vocabulary')}
-              icon={
-                <Icon className="h-4 w-4">
-                  <path d="M19 21 12 16l-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                </Icon>
-              }
-            />
-          </div>
-        </section>
+          </section>
+        </div>
 
         {/* rodapé: conta + ajustes */}
         <footer className="flex shrink-0 items-center gap-1 border-t border-zinc-900/5 p-2">

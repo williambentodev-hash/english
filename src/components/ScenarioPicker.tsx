@@ -7,8 +7,9 @@ interface Props {
   onChange: (id: string) => void
 }
 
-/** Escolha da situação a praticar, mostrada antes da primeira frase da conversa (faixa que rola de lado). */
+/** Escolha da situação a praticar, mostrada antes da primeira frase da conversa (chips que rolam de lado). */
 export default function ScenarioPicker({ goal, value, onChange }: Props) {
+  const current = scenariosFor(goal).find((s) => s.id === value)
   return (
     <section aria-labelledby="scenario-title" className="space-y-1.5 animate-in">
       <h2 id="scenario-title" className="px-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
@@ -17,7 +18,7 @@ export default function ScenarioPicker({ goal, value, onChange }: Props) {
       <div
         role="radiogroup"
         aria-labelledby="scenario-title"
-        className="-mx-3 flex snap-x gap-2 overflow-x-auto px-3 pb-2 [scrollbar-width:thin]"
+        className="-mx-3 flex snap-x gap-1.5 overflow-x-auto px-3 pb-1 [scrollbar-width:none]"
       >
         {scenariosFor(goal).map((s) => {
           const active = s.id === value
@@ -27,20 +28,19 @@ export default function ScenarioPicker({ goal, value, onChange }: Props) {
               type="button"
               role="radio"
               aria-checked={active}
+              title={s.hint}
               onClick={() => onChange(s.id)}
-              className={`flex w-40 shrink-0 snap-start flex-col gap-1 rounded-2xl px-3 py-2.5 text-left ring-1 ring-inset transition-all duration-300 ease-out active:scale-[0.98] ${
-                active ? 'bg-blue-50 ring-blue-300' : 'bg-white ring-zinc-900/5 hover:bg-zinc-50'
+              className={`flex h-9 shrink-0 snap-start items-center gap-1.5 rounded-full px-3 text-[13px] font-medium whitespace-nowrap ring-1 ring-inset transition-all duration-300 ease-out active:scale-95 ${
+                active ? 'bg-blue-500 text-white ring-blue-500' : 'bg-white text-zinc-700 ring-zinc-900/10 hover:bg-zinc-50'
               }`}
             >
-              <span className="text-lg leading-none" aria-hidden>{s.emoji}</span>
-              <span className={`text-[13.5px] font-medium leading-snug ${active ? 'text-blue-700' : 'text-zinc-800'}`}>
-                {s.title}
-              </span>
-              <span className="text-xs leading-snug text-zinc-500">{s.hint}</span>
+              <span aria-hidden>{s.emoji}</span>
+              {s.title}
             </button>
           )
         })}
       </div>
+      {current && <p className="px-1 text-xs text-zinc-500">{current.hint}</p>}
     </section>
   )
 }
