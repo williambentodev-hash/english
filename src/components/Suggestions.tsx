@@ -11,7 +11,7 @@ export default function Suggestions({ suggestions, onPick }: Props) {
   if (!suggestions.length) return null
   return (
     <section aria-label="Sugestões de resposta" className="flex flex-col items-end gap-1.5 pt-1 animate-in">
-      <p className="px-1 text-xs text-zinc-400">Não sabe o que dizer? Toque numa ideia e adapte.</p>
+      <p className="px-1 text-xs text-zinc-400">💡 Ideias de resposta · ou escreva em português</p>
       {suggestions.map((s) => (
         <button
           key={s.text}
@@ -25,7 +25,6 @@ export default function Suggestions({ suggestions, onPick }: Props) {
           )}
         </button>
       ))}
-      <p className="px-1 text-xs text-zinc-400">Ou escreva em português: eu mostro como se diz.</p>
     </section>
   )
 }
